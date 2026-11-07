@@ -130,6 +130,31 @@ final class EditableClip
       clip.clearStep(note.channel(), note.x(), note.key());
    }
 
+   /** Deletes every note of the clip. */
+   void clearAll()
+   {
+      clip.clearSteps();
+   }
+
+   /**
+    * Returns a short description of what the cursor sees, for diagnostics: note count, the range
+    * of note positions in steps, and the clip length in beats.
+    */
+   String describe()
+   {
+      int min = Integer.MAX_VALUE;
+      int max = Integer.MIN_VALUE;
+      final List<NoteData> all = notes.all();
+      for (final NoteData n : all)
+      {
+         min = Math.min(min, n.x());
+         max = Math.max(max, n.x());
+      }
+      final String range = all.isEmpty() ? "" : String.format(" at steps %d..%d", min, max);
+      return String.format("%d notes%s, clip length %.2f beats, playing step %d", all.size(),
+         range, clip.getPlayStop().get(), clip.playingStep().get());
+   }
+
    /** Returns whether no note updates arrived for ``quietMillis``. */
    boolean isSettled(final long quietMillis)
    {

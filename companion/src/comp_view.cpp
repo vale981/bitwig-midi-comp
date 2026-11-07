@@ -839,6 +839,14 @@ void CompView::drawLog(const State& state) {
     const float scale = ImGui::GetFontSize() / 13.0f;
     ImGui::SetNextWindowSize(ImVec2(520.0f * scale, 260.0f * scale), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Extension log", &showLog_)) {
+        if (ImGui::SmallButton("Copy")) {
+            std::string text;
+            for (const auto& line : state.log)
+                text += line + "\n";
+            ImGui::SetClipboardText(text.c_str());
+        }
+        ImGui::SetItemTooltip("Copy the log to the clipboard");
+        ImGui::Separator();
         if (state.log.empty())
             ImGui::TextDisabled("No events yet. Start comping and record to see what happens.");
         for (const auto& line : state.log)

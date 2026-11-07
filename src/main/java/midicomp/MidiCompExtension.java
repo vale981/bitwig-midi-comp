@@ -117,6 +117,7 @@ public class MidiCompExtension extends ControllerExtension
    private boolean recordingRequested;
    private long recordingRequestedAt;
    private boolean recordingSeen;
+   private boolean emptyCheckLogged;
 
    private final ConcurrentLinkedQueue<Command> commands = new ConcurrentLinkedQueue<>();
    private CompServer server;
@@ -605,7 +606,7 @@ public class MidiCompExtension extends ControllerExtension
          pinTargetToSelection();
       live.link(ref, content);
       capture.start();
-      log("Comping " + ref.label() + " (" + content.size() + " notes)");
+      log("Comping " + ref.label() + ": " + selected.describe());
       return Result.ok("Comping " + ref.label() + ". Record into it with the loop on; each pass "
          + "becomes a take.");
    }
@@ -678,6 +679,13 @@ public class MidiCompExtension extends ControllerExtension
 
       if (recordingRequested)
       {
+         // Diagnostics: did emptying the clip take effect?
+         if (!emptyCheckLogged && System.nanoTime() - recordingRequestedAt > 500_000_000L)
+         {
+            emptyCheckLogged = true;
+            log((available ? "After emptying, the clip shows " : "After emptying (clip not selected) ")
+               + clip.describe());
+         }
          if (recording)
             recordingSeen = true;
          else if (recordingSeen && !capture.isPending())
@@ -768,8 +776,9 @@ public class MidiCompExtension extends ControllerExtension
       // Record into an empty clip: only the pass being recorded is heard. The comp is written back
       // from the takes when recording ends.
       final EditableClip clip = sessionClip();
-      for (final NoteData n : clip.notes().all())
-         clip.clear(n);
+      log("Emptying the comp clip before recording; it shows " + clip.describe());
+      clip.clearAll();
+      emptyCheckLogged = false;
       recordingRequested = true;
       recordingSeen = false;
       recordingRequestedAt = System.nanoTime();
