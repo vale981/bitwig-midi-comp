@@ -494,12 +494,15 @@ void CompView::drawViewMenu() {
     ImGui::SetItemTooltip("UI scale");
     if (!ImGui::BeginPopup("view"))
         return;
-    float percent = uiScaleRequest_.value_or(uiScale_) * 100.0f;
+    // The slider keeps its own value while dragged; the scale applies on release, since
+    // rebuilding the fonts while dragging would move the slider under the pointer.
+    if (!scaleSliderActive_)
+        scaleDraft_ = uiScaleRequest_.value_or(uiScale_) * 100.0f;
     ImGui::SetNextItemWidth(160.0f * ImGui::GetFontSize() / 13.0f);
-    ImGui::SliderFloat("UI scale", &percent, 50.0f, 300.0f, "%.0f%%");
-    // Apply on release: rebuilding the fonts while dragging would move the slider.
+    ImGui::SliderFloat("UI scale", &scaleDraft_, 50.0f, 300.0f, "%.0f%%");
+    scaleSliderActive_ = ImGui::IsItemActive();
     if (ImGui::IsItemDeactivatedAfterEdit())
-        uiScaleRequest_ = std::clamp(percent / 100.0f, 0.5f, 3.0f);
+        uiScaleRequest_ = std::clamp(scaleDraft_ / 100.0f, 0.5f, 3.0f);
     ImGui::SameLine();
     if (ImGui::SmallButton("100%"))
         uiScaleRequest_ = 1.0f;

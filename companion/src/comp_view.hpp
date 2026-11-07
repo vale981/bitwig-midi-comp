@@ -166,6 +166,8 @@ class CompView {
     std::string demoKeyboard_;
     float uiScale_ = 1.0f;
     std::optional<float> uiScaleRequest_;
+    float scaleDraft_ = 100.0f;  ///< Slider value in percent while it is being dragged.
+    bool scaleSliderActive_ = false;
     std::vector<std::string> midiPorts_;  ///< Listed when the picker opens.
     std::int64_t lastMidiPost_ = 0;
 
