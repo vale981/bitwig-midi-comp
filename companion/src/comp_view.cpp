@@ -408,7 +408,8 @@ void CompView::drawSessionStatus(const State& state) {
     ImGui::Text("Comping %s", s.label.c_str());
     ImGui::SameLine();
     if (s.recording) {
-        ImGui::TextColored(color(palette_.error), "Recording pass %d", s.passes + 1);
+        ImGui::TextColored(color(palette_.error), "Recording pass %d",
+                           std::max(1, s.recordingPass));
     } else if (!s.available) {
         ImGui::TextColored(color(palette_.warning), "%s",
                            s.pending ? "Changes waiting: select a clip on its track"

@@ -77,7 +77,8 @@ State document:
     "truncated": false,             // the comp is longer than the clip
     "clipLength": 2048,             // clip length in steps, -1 while it is not under its cursor
     "passes": 3,                    // loop passes recorded in this session
-    "singlePass": false             // recording stops at the end of the current pass
+    "singlePass": false,            // recording stops at the end of the current pass
+    "recordingPass": 0              // loop pass being recorded (1-based), 0 when not recording
   },
   "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [
@@ -100,7 +101,7 @@ Bitwig did not process the command within 5 s.
 
 | Command      | Parameters                  | Effect |
 |--------------|-----------------------------|--------|
-| `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. |
+| `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. The grid resolution is chosen for the clip; if it changes, the clip is re-read first and the reply says "Preparing". |
 | `end`        |                             | End the session; the clip keeps the comp. |
 | `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start with overdub on (restored afterwards). Each pass is removed from the clip when collected and becomes a take; the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
 | `stopRecording` |                          | Stop the transport and arranger recording. |
@@ -148,5 +149,9 @@ the step size, so `import` can rescale positions if the timing resolution change
   pass that ends the recording waits until the clip's notes have settled and retries for up to
   3 s, since Bitwig may add recorded notes only after recording stops. Passes are collected once
   a clip on the comp clip's track is selected. Afterwards the comp is written over the recording.
+- Bitwig hides arranger clips from extensions while recording. For arranger recordings, the
+  notes played on the extension's MIDI input are logged with pass and loop position, and the
+  recording's notes are sorted into passes by matching them per key, in order of loop position,
+  within 80 ms. Unmatched notes go to the last pass.
 - `log` lists recent capture events (recording start and stop, wraps, collected passes); the
   same lines go to Bitwig's controller console.

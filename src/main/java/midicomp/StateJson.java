@@ -28,6 +28,7 @@ final class StateJson
     *    clipLength: the clip's length in steps, or ``-1`` while it is not under its cursor.
     *    passes: loop passes recorded in this session.
     *    singlePass: whether recording stops at the end of the current pass.
+    *    recordingPass: the loop pass being recorded (1-based), or 0 when not recording.
     */
    record SessionStatus(
       ClipRef clip,
@@ -37,7 +38,8 @@ final class StateJson
       boolean truncated,
       int clipLength,
       int passes,
-      boolean singlePass)
+      boolean singlePass,
+      int recordingPass)
    {
    }
 
@@ -105,6 +107,7 @@ final class StateJson
             .append(",\"clipLength\":").append(session.clipLength())
             .append(",\"passes\":").append(session.passes())
             .append(",\"singlePass\":").append(session.singlePass())
+            .append(",\"recordingPass\":").append(session.recordingPass())
             .append('}');
 
       sb.append(",\"takes\":[");

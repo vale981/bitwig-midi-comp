@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Turns each pass of a loop recording into the session clip into a take.
@@ -81,6 +82,7 @@ final class LoopCapture
    private boolean stopRequested;
    private boolean ignoreStop;
    private boolean clearPasses;
+   private Function<List<NoteData>, List<List<NoteData>>> splitter;
 
    /**
     * Args:
@@ -134,6 +136,25 @@ final class LoopCapture
    void setClearPasses(final boolean clear)
    {
       clearPasses = clear;
+   }
+
+   /**
+    * Splits the notes collected when a recording ends into passes, for recordings whose notes only
+    * become visible at the end (see :class:`PassSorter`). Reset after use.
+    *
+    * Args:
+    *    split: receives the new notes and returns them grouped by pass, or ``null`` to keep them
+    *       together.
+    */
+   void setSplitter(final Function<List<NoteData>, List<List<NoteData>>> split)
+   {
+      splitter = split;
+   }
+
+   /** Returns the number of loop wraps seen in the current recording. */
+   int wraps()
+   {
+      return wraps.size();
    }
 
    /** Starts watching for recordings; previous passes are forgotten. */
@@ -261,17 +282,26 @@ final class LoopCapture
             break;
          due.pollFirst();
          waitingLogged = false;
+         final Function<List<NoteData>, List<List<NoteData>>> split = next.last() ? splitter : null;
          if (next.last())
+         {
             clearPasses = false;
+            splitter = null;
+         }
          if (pass.isEmpty())
          {
             log.accept(String.format("Pass %d: no new notes%s", next.pass() + 1,
                next.last() ? " arrived after recording" : ""));
             continue;
          }
-         passes++;
-         log.accept(String.format("Pass %d: %d notes -> take", next.pass() + 1, pass.size()));
-         collected.add(pass);
+         for (final List<NoteData> part : split != null ? split.apply(pass) : List.of(pass))
+         {
+            if (part.isEmpty())
+               continue;
+            passes++;
+            log.accept(String.format("Take %d: %d notes", passes, part.size()));
+            collected.add(part);
+         }
       }
       return collected;
    }

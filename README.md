@@ -20,14 +20,18 @@ Two parts:
    ![Start screen](docs/screenshots/start.png)
 
 2. **Record.** Set the loop region over the clip and press *Record* in the companion (arranger
-   clips; a clip on the comp track must be selected). It empties the clip, so you hear only what
-   you play, and records from the loop start. Each pass is taken out of the clip when the loop
-   wraps and becomes a take; when recording stops, the comp is written back. With *Stop at loop
-   end* (default) recording stops after one pass; without it, it continues until you press
-   *Stop*. For this, overdub is switched on while recording and restored afterwards.
+   clips; a clip on the comp track must be selected). It empties the clip, so the comp is not
+   heard, and records from the loop start with overdub on (restored afterwards). With *Stop at
+   loop end* (default) recording stops after one pass; without it, it continues until you press
+   *Stop*, and every loop pass becomes a take. When recording stops, the comp is written back.
 
-   Recording in Bitwig directly also splits loop passes into takes, but only if Bitwig reports the
-   notes while it records; launcher clips are recorded that way. Overdub is left as you set it: without it Bitwig records
+   Bitwig hides the arranger clip from extensions while it records and merges all passes into
+   it, so the passes are sorted afterwards: the extension listens to your keyboard on its MIDI
+   input, notes which pass and loop position each key was played at, and matches Bitwig's
+   recorded notes (exact timing, all attributes) to them. Notes played within a few milliseconds
+   of the same key in another pass may swap passes. Without the MIDI input configured, a
+   recording becomes one take. With overdub, earlier passes play back while you record later
+   ones. Overdub is left as you set it: without it Bitwig records
    into a new clip on top of the comp clip, which then becomes the comp clip. *Log* shows what the
    extension saw (recording, loop wraps, collected passes), which helps when a pass does not show
    up.
@@ -76,12 +80,13 @@ Download the extension and the companion for your platform from the
 
 1. Copy `MidiComp.bwextension` to `~/Bitwig Studio/Extensions/` (Windows:
    `Documents\Bitwig Studio\Extensions`).
-2. In Bitwig: *Dashboard > Settings > Controllers > Add controller > Utility > MIDI Comp*. The
-   extension has no MIDI ports.
+2. In Bitwig: *Dashboard > Settings > Controllers > Add controller > Utility > MIDI Comp*, and
+   select the keyboard you record with as its MIDI input. The extension forwards the keyboard as
+   a note input, so tracks set to *All ins* (or to *MIDI Comp*) keep receiving it; if the keyboard
+   is also used by another controller, set the recording track's input to one of them to avoid
+   doubled notes.
 3. Start `midicomp-companion`. It finds the extension through `~/.midicomp/endpoint.json`, which
    the extension writes on startup, and reconnects when the extension restarts.
-
-The controller preferences contain the timing resolution (see Limitations).
 
 ### Companion options
 
@@ -144,10 +149,10 @@ On NixOS, point `LD_LIBRARY_PATH` at Mesa's `lib` directory and set
 
 ## Limitations
 
-- **Timing resolution.** Notes are accessed through a grid of 16384 steps; note starts are rounded
-  to one step. The *Timing resolution* preference trades precision against maximum clip length:
-  1/64 beat (7.8 ms at 120 BPM, 64 bars), 1/128 beat (3.9 ms, 32 bars, default), 1/256 beat
-  (2.0 ms, 16 bars).
+- **Timing resolution.** The API exposes notes through a step grid (16384 steps here); a note's
+  start is the step it falls in. Each session picks the finest step at which its clip fits, from
+  1/4096 beat down to 1/64 beat: an 8-beat clip gets 1/2048 beat (0.25 ms at 120 BPM), a 32-bar
+  clip 1/512 beat (1 ms). Clips longer than 256 bars cannot be fully accessed.
 - **Copied attributes.** Velocity, release velocity, duration, pan, timbre, pressure, gain,
   transpose, chance, occurrence, recurrence, repeats and mute. Drawn per-note expression curves and
   clip automation (CC, pitch bend) are not exposed by the API and are not copied.

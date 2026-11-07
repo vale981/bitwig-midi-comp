@@ -13,7 +13,8 @@ import com.bitwig.extension.controller.ControllerExtension;
 import com.bitwig.extension.controller.api.ControllerHost;
 import com.bitwig.extension.controller.api.CursorTrack;
 import com.bitwig.extension.controller.api.PinnableCursorClip;
-import com.bitwig.extension.controller.api.SettableEnumValue;
+import com.bitwig.extension.controller.api.MidiIn;
+import com.bitwig.extension.controller.api.NoteInput;
 import com.bitwig.extension.controller.api.SettableStringValue;
 import com.bitwig.extension.controller.api.Setting;
 import com.bitwig.extension.controller.api.StringValue;
@@ -42,9 +43,11 @@ public class MidiCompExtension extends ControllerExtension
    private static final int SERVER_PORT = 8765;
    private static final int SERVER_PORT_ATTEMPTS = 10;
 
-   private static final String[] RESOLUTIONS = { "1/64 beat (64 bars)", "1/128 beat (32 bars)",
-      "1/256 beat (16 bars)" };
-   private static final double[] RESOLUTION_STEPS = { 1.0 / 64, 1.0 / 128, 1.0 / 256 };
+   /** Coarsest and finest grid step in beats; sessions use the finest one their clip fits. */
+   private static final double COARSEST_STEP = 1.0 / 64;
+   private static final double FINEST_STEP = 1.0 / 4096;
+   /** Played notes and recorded notes further apart than this are not matched. */
+   private static final double MATCH_SECONDS = 0.08;
 
    /** Outcome of a command. */
    private record Result(boolean ok, String message)
@@ -106,7 +109,7 @@ public class MidiCompExtension extends ControllerExtension
    private final Deque<String> eventLog = new ArrayDeque<>();
    private static final int EVENT_LOG_SIZE = 40;
    private final Deque<HistoryEntry> history = new ArrayDeque<>();
-   private double stepSize = RESOLUTION_STEPS[1];
+   private double stepSize = 1.0 / 128;
    private boolean wasRecording;
    /** The user's overdub setting while a recording started from the companion runs, else null. */
    private Boolean overdubToRestore;
@@ -117,6 +120,14 @@ public class MidiCompExtension extends ControllerExtension
    private boolean recordingRequested;
    private long recordingRequestedAt;
    private boolean recordingSeen;
+   /** A session waiting for its clip to be re-read at a new grid resolution. */
+   private String pendingStart;
+   private long pendingStartAt;
+   /** Notes played on the MIDI input during the current recording. */
+   private final List<PassSorter.Played> played = new ArrayList<>();
+   private int playedWraps;
+   private double lastPosition = Double.NaN;
+   private long lastPositionAt;
    private boolean emptyCheckLogged;
 
    private final ConcurrentLinkedQueue<Command> commands = new ConcurrentLinkedQueue<>();
@@ -160,10 +171,15 @@ public class MidiCompExtension extends ControllerExtension
          "not running");
       ((Setting) apiStatus).disable();
 
-      // Last: the resolution observer touches state created above.
-      final SettableEnumValue resolution = host.getPreferences().getEnumSetting(
-         "Timing resolution", "MIDI Comp", RESOLUTIONS, RESOLUTIONS[1]);
-      resolution.addValueObserver(this::setResolution);
+      // The keyboard on the MIDI input is forwarded to tracks, and its notes are watched while
+      // recording to sort loop passes (see PassSorter).
+      final MidiIn midiIn = host.getMidiInPort(0);
+      final NoteInput keyboard = midiIn.createNoteInput("Keyboard", "??????");
+      keyboard.setShouldConsumeEvents(false);
+      midiIn.setMidiCallback(this::onMidi);
+      transport.tempo().value().markInterested();
+      transport.arrangerLoopDuration().markInterested();
+      transport.playPosition().addValueObserver(this::onPosition);
 
       startServer();
       running = true;
@@ -317,6 +333,7 @@ public class MidiCompExtension extends ControllerExtension
          c.reply().complete(Json.reply(result.ok(), result.message()));
       }
 
+      tickPendingStart();
       tickSession();
 
       if (stateDirty && server != null)
@@ -342,7 +359,8 @@ public class MidiCompExtension extends ControllerExtension
             live.isPending(),
             compLongerThanClip(), sessionAvailable() ? clipSteps(sessionClip()) : -1,
             capture.passes(),
-            capture.isSinglePass());
+            capture.isSinglePass(),
+            isRecording() ? playedWraps + 1 : 0);
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
          session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
@@ -590,13 +608,67 @@ public class MidiCompExtension extends ControllerExtension
          return Result.fail(selectHint(selected, "the clip to comp"));
       if (ref.sameClip(live.link()))
          return Result.fail("Already comping " + ref.label());
-      if (!selected.isSettled(LiveSync.SETTLE_MILLIS))
-         return Result.fail("Bitwig is still sending the clip's notes; try again");
 
       if (live.link() != null)
          endSession();
       model.clear();
       history.clear();
+
+      // Use the finest grid the clip fits; the clip's notes are re-read before the session starts.
+      final double wanted = stepSizeFor(selected.clip().getPlayStop().get());
+      if (wanted != stepSize)
+      {
+         stepSize = wanted;
+         for (final EditableClip clip : List.of(launcherSel, target, arranger))
+            clip.setStepSize(stepSize);
+         pendingStart = source;
+         pendingStartAt = System.nanoTime();
+         log(String.format("Reading %s at 1/%d beat resolution", ref.label(),
+            Math.round(1.0 / stepSize)));
+         return Result.ok("Preparing " + ref.label());
+      }
+      if (!selected.isSettled(LiveSync.SETTLE_MILLIS))
+         return Result.fail("Bitwig is still sending the clip's notes; try again");
+      return finishStart(selected, ref);
+   }
+
+   /** Completes a session start that waited for the clip at a new resolution. */
+   private void tickPendingStart()
+   {
+      if (pendingStart == null)
+         return;
+      final EditableClip selected = selectionCursor(pendingStart);
+      final ClipRef ref = refOf(selected);
+      final long waited = System.nanoTime() - pendingStartAt;
+      // Give the host time to start re-sending notes, then wait until it is done.
+      if (ref != null && waited > 400_000_000L && selected.isSettled(LiveSync.SETTLE_MILLIS))
+      {
+         pendingStart = null;
+         lastMessage = finishStart(selected, ref).message();
+         markDirty();
+      }
+      else if (waited > 5_000_000_000L)
+      {
+         pendingStart = null;
+         lastMessage = "Could not read the clip; select it and try again";
+         markDirty();
+      }
+   }
+
+   /**
+    * Returns the finest grid step (a power-of-two fraction of a beat) at which a clip of
+    * ``beats`` fits into the grid.
+    */
+   private static double stepSizeFor(final double beats)
+   {
+      double step = FINEST_STEP;
+      while (step < COARSEST_STEP && beats / step > GRID_WIDTH)
+         step *= 2;
+      return step;
+   }
+
+   private Result finishStart(final EditableClip selected, final ClipRef ref)
+   {
 
       // What the clip holds now becomes the first take, and the content the sync expects.
       final List<NoteData> content = selected.notes().all();
@@ -662,6 +734,15 @@ public class MidiCompExtension extends ControllerExtension
       {
          wasRecording = recording;
          markDirty();
+         if (recording && live.link().source() == Take.Source.ARRANGER)
+         {
+            if (!recordingRequested)
+            {
+               played.clear();
+               playedWraps = 0;
+            }
+            capture.setSplitter(this::splitByPlayedNotes);
+         }
          if (!recording && overdubToRestore != null)
          {
             transport.isArrangerOverdubEnabled().set(overdubToRestore);
@@ -782,6 +863,8 @@ public class MidiCompExtension extends ControllerExtension
       recordingRequested = true;
       recordingSeen = false;
       recordingRequestedAt = System.nanoTime();
+      played.clear();
+      playedWraps = 0;
 
       // Overdub makes Bitwig record into the comp clip itself; each collected pass is then
       // removed again, so every pass starts empty. The setting is restored afterwards.
@@ -823,6 +906,62 @@ public class MidiCompExtension extends ControllerExtension
       markDirty();
    }
 
+   private boolean transportRecording()
+   {
+      return transport.isPlaying().get() && transport.isArrangerRecordEnabled().get();
+   }
+
+   /** Tracks the playback position for timing played notes, counting loop wraps. */
+   private void onPosition(final double position)
+   {
+      if (transportRecording() && !Double.isNaN(lastPosition)
+         && position < lastPosition - LoopCapture.WRAP_BEATS)
+         playedWraps++;
+      lastPosition = position;
+      lastPositionAt = System.nanoTime();
+   }
+
+   /** Notes each key played while recording, with its pass and position in the loop. */
+   private void onMidi(final int status, final int data1, final int data2)
+   {
+      if ((status & 0xF0) != 0x90 || data2 == 0 || !transportRecording()
+         || Double.isNaN(lastPosition))
+         return;
+      final double tempo = transport.tempo().value().getRaw();
+      final double loopLength = transport.arrangerLoopDuration().get();
+      final double position =
+         lastPosition + (System.nanoTime() - lastPositionAt) / 1e9 * tempo / 60.0;
+      double inLoop = position - transport.arrangerLoopStart().get();
+      int pass = playedWraps;
+      if (inLoop < 0 || loopLength <= 0)
+         return; // Pre-roll; nothing is recorded yet.
+      // Past the loop end before the jump back was reported: already the next pass.
+      while (inLoop >= loopLength)
+      {
+         inLoop -= loopLength;
+         pass++;
+      }
+      played.add(new PassSorter.Played(data1, pass, inLoop));
+   }
+
+   /** Sorts a recording's notes into passes by the notes played on the MIDI input. */
+   private List<List<NoteData>> splitByPlayedNotes(final List<NoteData> notes)
+   {
+      if (played.isEmpty())
+      {
+         log("No notes arrived on the MIDI input, so the recording is one take. Select your "
+            + "keyboard as the MIDI Comp input to get a take per loop pass.");
+         return List.of(notes);
+      }
+      final double tempo = transport.tempo().value().getRaw();
+      final PassSorter.Result result = PassSorter.sort(notes, List.copyOf(played), stepSize,
+         transport.arrangerLoopDuration().get(), MATCH_SECONDS * tempo / 60.0);
+      log(String.format("Sorted %d notes into %d takes using %d played notes (%d unmatched, "
+         + "added to the last take)", notes.size(), result.passes().size(), played.size(),
+         result.unmatched()));
+      return result.passes();
+   }
+
    /**
     * Records a diagnostic event: printed to the controller console and kept for the companion.
     *
@@ -856,25 +995,6 @@ public class MidiCompExtension extends ControllerExtension
 
    // ---------------------------------------------------------------------------------------------
    // Preferences and formatting
-
-   private void setResolution(final String label)
-   {
-      final int index = List.of(RESOLUTIONS).indexOf(label);
-      final double newStepSize = RESOLUTION_STEPS[index < 0 ? 1 : index];
-      if (newStepSize == stepSize)
-         return;
-
-      // Grid coordinates change meaning; the host re-reports all notes for the new grid.
-      stepSize = newStepSize;
-      if (live.link() != null)
-         endSession();
-      history.clear();
-      model.clear();
-      lastMessage = "Timing resolution changed; the comp session was ended";
-      markDirty();
-      for (final EditableClip clip : List.of(launcherSel, target, arranger))
-         clip.setStepSize(stepSize);
-   }
 
    private double barBeats()
    {

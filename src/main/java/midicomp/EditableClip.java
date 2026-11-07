@@ -66,6 +66,7 @@ final class EditableClip
       notes.clear();
       pendingAttributes.clear();
       clip.setStepSize(stepSize);
+      touch();
    }
 
    /**
