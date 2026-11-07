@@ -157,33 +157,70 @@ final class EditableClip
    }
 
    /**
+    * Result of :meth:`cellDifference`.
+    *
+    * Args:
+    *    leftover: notes in the clip whose cells are not expected.
+    *    missing: number of expected cells without a note.
+    */
+   record CellDifference(List<NoteData> leftover, int missing)
+   {
+      boolean isEmpty()
+      {
+         return leftover.isEmpty() && missing == 0;
+      }
+   }
+
+   /**
     * Compares which cells in ``[from, to)`` hold notes with ``expected``, ignoring attributes.
     *
     * Args:
     *    from: first step, inclusive.
     *    to: last step, exclusive.
     *    expected: the notes the range should contain.
-    *
-    * Returns:
-    *    ``{leftover, missing}``: notes in the clip that are not expected, and expected notes that
-    *    are not in the clip.
+    *    ignored: cells to leave out of the comparison.
     */
-   int[] cellDifference(final int from, final int to, final List<NoteData> expected)
+   CellDifference cellDifference(
+      final int from,
+      final int to,
+      final List<NoteData> expected,
+      final java.util.Set<Long> ignored)
    {
       final java.util.Set<Long> wanted = new java.util.HashSet<>();
       for (final NoteData n : expected)
          if (n.x() >= from && n.x() < to)
             wanted.add(n.cellKey());
-      int leftover = 0;
+      final List<NoteData> leftover = new ArrayList<>();
       int present = 0;
       for (final NoteData n : notes.startingIn(from, to))
       {
+         if (ignored.contains(n.cellKey()))
+            continue;
          if (wanted.contains(n.cellKey()))
             present++;
          else
-            leftover++;
+            leftover.add(n);
       }
-      return new int[] { leftover, wanted.size() - present };
+      return new CellDifference(leftover, wanted.size() - present);
+   }
+
+   /**
+    * Deletes every note of the clip and writes ``all`` instead.
+    *
+    * Args:
+    *    all: the clip's new content.
+    *
+    * Returns:
+    *    The operation, for :meth:`revert`.
+    */
+   CompOperation rewriteAll(final List<NoteData> all)
+   {
+      final List<NoteData> removed = notes.all();
+      pendingAttributes.clear();
+      clip.clearSteps();
+      for (final NoteData n : all)
+         write(n);
+      return new CompOperation(removed, List.copyOf(all));
    }
 
    /** Returns whether no note updates arrived for ``quietMillis``. */

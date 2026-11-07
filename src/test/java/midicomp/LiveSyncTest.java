@@ -214,14 +214,14 @@ class LiveSyncTest
 
       final LiveSync.Tick check = tick();
       assertFalse(check.wrote());
-      assertEquals(1, check.leftover());
+      assertEquals(1, check.leftover().size());
       assertTrue(live.isPending());
 
       assertTrue(tick().wrote());
       settle();
       assertTrue(Double.isNaN(fake.velocityAt(200, 72)));
       final LiveSync.Tick again = tick();
-      assertEquals(0, again.leftover());
+      assertTrue(again.leftover().isEmpty());
       assertFalse(live.isPending());
    }
 
@@ -231,11 +231,48 @@ class LiveSyncTest
       link();
       tick();
       settle();
-      assertEquals(0, tick().leftover()); // verified
+      assertTrue(tick().leftover().isEmpty()); // verified
 
       fake.userAdd(200, 72, 0.9, 0.5);
       settle();
       assertFalse(tick().wrote());
       assertFalse(Double.isNaN(fake.velocityAt(200, 72)));
+   }
+
+   @Test
+   void aNoteThatCannotBeDeletedIsReportedOnceAndThenIgnored()
+   {
+      link();
+      tick();
+      settle();
+      // A note the host refuses to delete, appearing in the comp range.
+      fake.userAdd(300, 40, 0.5, 0.1);
+      fake.stuck.add(NoteData.cellKey(0, 300, 40));
+      model.assign(0, 128, b.id());
+      live.markDirty();
+
+      LiveSync.Tick t = tick();
+      settle();
+      int checks = 0;
+      boolean gaveUp = false;
+      for (int i = 0; i < 12 && !gaveUp; i++)
+      {
+         t = tick();
+         settle();
+         if (!t.leftover().isEmpty())
+            checks++;
+         gaveUp = t.gaveUp();
+      }
+      assertTrue(gaveUp, "gives up");
+      assertEquals(3, checks, "plain rewrite, full rewrite, then give up");
+      assertTrue(clip.contains(0, 512, rendered())
+         || fake.cells.containsKey(NoteData.cellKey(0, 300, 40)));
+
+      // Later changes no longer trip over it.
+      model.assign(0, 128, a.id());
+      live.markDirty();
+      tick();
+      settle();
+      assertTrue(tick().leftover().isEmpty());
    }
 }

@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.bitwig.extension.controller.ControllerExtension;
+import com.bitwig.extension.controller.ControllerExtensionDefinition;
 import com.bitwig.extension.controller.api.ControllerHost;
 import com.bitwig.extension.controller.api.CursorTrack;
 import com.bitwig.extension.controller.api.PinnableCursorClip;
@@ -141,11 +142,22 @@ public class MidiCompExtension extends ControllerExtension
 
    private SettableStringValue apiStatus;
 
+   /** Whether this instance has a MIDI input for the keyboard. */
+   private final boolean keyboardInput;
+
+   /**
+    * Args:
+    *    definition: the extension definition.
+    *    host: the controller host.
+    *    keyboardInput: whether the definition declares a MIDI input for the keyboard.
+    */
    protected MidiCompExtension(
-      final MidiCompExtensionDefinition definition,
-      final ControllerHost host)
+      final ControllerExtensionDefinition definition,
+      final ControllerHost host,
+      final boolean keyboardInput)
    {
       super(definition, host);
+      this.keyboardInput = keyboardInput;
    }
 
    @Override
@@ -172,12 +184,15 @@ public class MidiCompExtension extends ControllerExtension
          "not running");
       ((Setting) apiStatus).disable();
 
-      // The keyboard on the MIDI input is forwarded to tracks, and its notes are watched while
-      // recording to sort loop passes (see PassSorter).
-      final MidiIn midiIn = host.getMidiInPort(0);
-      final NoteInput keyboard = midiIn.createNoteInput("Keyboard", "??????");
-      keyboard.setShouldConsumeEvents(false);
-      midiIn.setMidiCallback(this::onMidi);
+      // With the keyboard-input variant, the keyboard is forwarded to tracks and its notes time
+      // loop passes (see PassSorter); otherwise the comp track's notes are used.
+      if (keyboardInput)
+      {
+         final MidiIn midiIn = host.getMidiInPort(0);
+         final NoteInput keyboard = midiIn.createNoteInput("Keyboard", "??????");
+         keyboard.setShouldConsumeEvents(false);
+         midiIn.setMidiCallback(this::onMidi);
+      }
       transport.tempo().value().markInterested();
       transport.arrangerLoopDuration().markInterested();
       transport.playPosition().addValueObserver(this::onPosition);
@@ -795,10 +810,18 @@ public class MidiCompExtension extends ControllerExtension
          pushHistory(new HistoryEntry(clip, tick.firstWrite(), live.link()));
       if (tick.wrote())
          markDirty();
-      if (tick.leftover() > 0 || tick.missing() > 0)
-         log(String.format("Clip check after writing: %d leftover notes, %d missing; %s",
-            tick.leftover(), tick.missing(),
-            live.isPending() ? "writing again" : "giving up after repeated attempts"));
+      if (!tick.leftover().isEmpty() || tick.missing() > 0)
+      {
+         final StringBuilder notes = new StringBuilder();
+         for (final NoteData n : tick.leftover())
+            notes.append(String.format("%n    key %d ch %d at step %d (beat %.3f), %.3f beats long",
+               n.key(), n.channel() + 1, n.x(), n.x() * stepSize, n.duration()));
+         log(String.format("Clip check after writing: %d leftover notes, %d missing (clip %.2f "
+            + "beats); %s%s", tick.leftover().size(), tick.missing(),
+            clip.clip().getPlayStop().get(),
+            tick.gaveUp() ? "these cannot be removed through the API and are ignored now"
+               : live.isPending() ? "writing again" : "", notes));
+      }
 
    }
 

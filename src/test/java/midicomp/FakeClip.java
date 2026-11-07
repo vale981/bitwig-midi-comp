@@ -37,6 +37,8 @@ final class FakeClip
    }
 
    final Map<Long, Cell> cells = new HashMap<>();
+   /** Cells whose notes ignore deletion, like notes the host does not let extensions remove. */
+   final java.util.Set<Long> stuck = new java.util.HashSet<>();
    private final Queue<NoteStep> pending = new ArrayDeque<>();
    private NoteStepChangedCallback observer;
    final Clip clip = proxy(Clip.class, this::clipCall);
@@ -103,10 +105,25 @@ final class FakeClip
             if (args.length != 3)
                throw new UnsupportedOperationException("clearStep without channel");
             writeCalls++;
-            final Cell cell = cells.remove(NoteData.cellKey(
-               (Integer) args[0], (Integer) args[1], (Integer) args[2]));
+            final long key = NoteData.cellKey((Integer) args[0], (Integer) args[1], (Integer) args[2]);
+            if (stuck.contains(key))
+               return null;
+            final Cell cell = cells.remove(key);
             if (cell != null)
                pending.add(step(cell, NoteStep.State.Empty));
+            return null;
+         }
+         case "clearSteps" ->
+         {
+            if (args.length != 0)
+               return null;
+            writeCalls++;
+            for (final Long key : new java.util.ArrayList<>(cells.keySet()))
+            {
+               if (stuck.contains(key))
+                  continue;
+               pending.add(step(cells.remove(key), NoteStep.State.Empty));
+            }
             return null;
          }
          case "getStep" ->

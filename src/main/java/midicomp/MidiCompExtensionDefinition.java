@@ -10,8 +10,9 @@ import com.bitwig.extension.controller.api.ControllerHost;
 /**
  * Registers the MIDI comping extension with Bitwig Studio.
  *
- * Added via *Settings > Controllers > Add controller > Utility > MIDI Comp*. Its MIDI input takes
- * the keyboard used for recording; the extension forwards it to tracks.
+ * Added via *Settings > Controllers > Add controller > Utility > MIDI Comp*. This variant has no
+ * MIDI ports; loop passes are timed by the notes the comp track plays. See
+ * :class:`MidiCompKeyboardExtensionDefinition` for the variant with a keyboard input.
  */
 public class MidiCompExtensionDefinition extends ControllerExtensionDefinition
 {
@@ -63,8 +64,7 @@ public class MidiCompExtensionDefinition extends ControllerExtensionDefinition
    @Override
    public int getNumMidiInPorts()
    {
-      // The keyboard: forwarded to tracks, and watched while recording to sort loop passes.
-      return 1;
+      return 0;
    }
 
    @Override
@@ -84,6 +84,6 @@ public class MidiCompExtensionDefinition extends ControllerExtensionDefinition
    @Override
    public MidiCompExtension createInstance(final ControllerHost host)
    {
-      return new MidiCompExtension(this, host);
+      return new MidiCompExtension(this, host, false);
    }
 }
