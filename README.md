@@ -258,3 +258,9 @@ These behaviors come from the API documentation and have not been verified in Bi
 - When a cursor moves to another clip, the host reports `Empty` for the old notes and `NoteOn`
   for the new ones within the 150 ms settle window.
 - A 16384 x 128 grid does not cost much memory or CPU in the host.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Release builds of the companion include Dear ImGui, GLFW,
+nlohmann/json, cpp-httplib and RtMidi (all MIT or similarly permissive) and the Roboto font
+(Apache 2.0).

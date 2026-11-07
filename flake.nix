@@ -20,6 +20,7 @@
         buildInputs = [ pkgs.glfw pkgs.imgui pkgs.httplib pkgs.nlohmann_json pkgs.libGL pkgs.rtmidi pkgs.alsa-lib ];
         cmakeFlags = [ "-DMIDICOMP_DEFAULT_FONT=${fontFor pkgs}" ];
         doCheck = true;
+        meta.license = pkgs.lib.licenses.mit;
       };
     in
     {
