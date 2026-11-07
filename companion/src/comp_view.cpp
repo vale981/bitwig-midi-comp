@@ -104,16 +104,13 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
     const bool haveArranger = state != nullptr && state->arrangerSel.has_value();
 
     if (state == nullptr || !state->session) {
-        ImGui::TextDisabled("Not comping");
     } else {
-        drawSessionStatus(*state);
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-
         const Session& session = *state->session;
+        // Buttons whose label changes keep one width, so nothing after them moves.
+        const float recordWidth =
+            ImGui::CalcTextSize("Record").x + 2.0f * ImGui::GetStyle().FramePadding.x;
         if (session.recording) {
-            if (ImGui::Button("Stop"))
+            if (ImGui::Button("Stop", ImVec2(recordWidth, 0)))
                 client.send("stopRecording");
             ImGui::SetItemTooltip("%s", session.singlePass
                                             ? "Recording stops at the end of the loop"
@@ -128,7 +125,7 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                                   ImGui::ColorConvertU32ToFloat4(darken(palette_.error, 0.2f)));
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(palette_.windowBg));
-            if (ImGui::Button("Record"))
+            if (ImGui::Button("Record", ImVec2(recordWidth, 0)))
                 client.send("record", {{"stopAtEnd", stopAtLoopEnd_ ? "true" : "false"}});
             ImGui::PopStyleColor(4);
             ImGui::SetItemTooltip(
@@ -171,10 +168,22 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
             client.send("end");
         ImGui::SetItemTooltip("Finish comping; the clip keeps the comp");
     }
-    ImGui::SameLine();
-    if (ImGui::SmallButton(showLog_ ? "Hide log" : "Log"))
+    if (state != nullptr && state->session)
+        ImGui::SameLine();
+    const float logWidth =
+        ImGui::CalcTextSize("Hide log").x + 2.0f * ImGui::GetStyle().FramePadding.x;
+    if (ImGui::Button(showLog_ ? "Hide log" : "Log", ImVec2(logWidth, 0)))
         showLog_ = !showLog_;
     ImGui::SetItemTooltip("Recent extension events (recording, loop passes)");
+
+    // Status last: its length changes, and nothing after it on this row can move.
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    if (state != nullptr && state->session)
+        drawSessionStatus(*state);
+    else
+        ImGui::TextDisabled("Not comping");
 
     // Second row: editing controls (only useful while comping) and the last message.
     const bool comping = state != nullptr && state->session.has_value();
@@ -404,6 +413,12 @@ void CompView::drawRecordHint(const State& state) {
 void CompView::drawSessionStatus(const State& state) {
     const Session& s = *state.session;
     const auto color = [](const ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); };
+    // Short writes are not worth showing; only a write that stays pending is.
+    const double now = ImGui::GetTime();
+    if (!s.pending)
+        pendingSince_ = -1.0;
+    else if (pendingSince_ < 0.0)
+        pendingSince_ = now;
 
     ImGui::Text("Comping %s", s.label.c_str());
     ImGui::SameLine();
@@ -418,7 +433,7 @@ void CompView::drawSessionStatus(const State& state) {
             "Bitwig only lets extensions edit the selected arranger clip. Any clip on the comp "
             "clip's track counts,\nincluding one Bitwig creates while recording. Launcher clips "
             "do not have this limit.");
-    } else if (s.pending) {
+    } else if (s.pending && now - pendingSince_ > 0.5) {
         ImGui::TextColored(color(palette_.warning), "Syncing");
     } else {
         ImGui::TextColored(color(palette_.live), "Live");

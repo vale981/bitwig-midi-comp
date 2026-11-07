@@ -111,6 +111,7 @@ class CompView {
     Palette palette_;
     bool stopAtLoopEnd_ = true;
     bool showLog_ = false;
+    double pendingSince_ = -1.0;  ///< When the current pending write was first seen.
 
     // Local comp store.
     CompStore* store_ = nullptr;
