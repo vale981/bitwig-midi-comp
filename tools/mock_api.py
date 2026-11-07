@@ -36,12 +36,12 @@ segments = [[0, 1024, 1], [1024, 2048, 4], [2048, 3072, 2], [3072, 3584, 6], [35
 comp = [n[:5] + [tid] for f, t, tid in segments for n in takes[tid - 1]["notes"] if f <= n[0] < t]
 
 if mode == "start":
-    state = {"v": 1, "stepsPerBeat": SPB, "barSteps": BAR, "length": 0,
+    state = {"v": 1, "project": "Demo song", "stepsPerBeat": SPB, "barSteps": BAR, "length": 0,
              "launcherSel": None, "arrangerSel": "Keys (arranger)", "canUndoEdit": False,
              "canRevert": False, "message": "", "session": None,
              "takes": [], "segments": [], "comp": []}
 elif mode == "record":
-    state = {"v": 1, "stepsPerBeat": SPB, "barSteps": BAR, "length": 0,
+    state = {"v": 1, "project": "Demo song", "stepsPerBeat": SPB, "barSteps": BAR, "length": 0,
              "launcherSel": None, "arrangerSel": "Keys (arranger)", "canUndoEdit": False,
              "canRevert": False, "message": "Comping Keys (arranger)",
              "session": {"source": "arranger", "label": "Keys (arranger)", "available": True,
@@ -49,7 +49,7 @@ elif mode == "record":
                          "truncated": False, "passes": 0},
              "takes": [], "segments": [], "comp": []}
 else:
-    state = {"v": 1, "stepsPerBeat": SPB, "barSteps": BAR, "length": LENGTH,
+    state = {"v": 1, "project": "Demo song", "stepsPerBeat": SPB, "barSteps": BAR, "length": LENGTH,
              "launcherSel": None, "arrangerSel": "Keys (arranger)", "canUndoEdit": True,
              "canRevert": True, "message": "Take 4: 3.1 to 5.1",
              "session": {"source": "arranger", "label": "Keys (arranger)", "available": True,

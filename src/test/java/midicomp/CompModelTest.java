@@ -127,7 +127,7 @@ class CompModelTest
    {
       final CompModel m = new CompModel();
       add(m, "Take \"1\"", note(0, 60, 0.5));
-      final String json = StateJson.build(7, m, STEP, 512,
+      final String json = StateJson.build(7, m, STEP, 512, "Song",
          new StateJson.Selection("Bass / Clip", null), null, false, "ok", List.of("event"));
       assertTrue(json.startsWith("{\"v\":7,"), json);
       assertTrue(json.contains("\"name\":\"Take \\\"1\\\"\""), json);

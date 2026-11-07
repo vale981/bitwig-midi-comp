@@ -1,9 +1,11 @@
 #pragma once
 
 #include "api_client.hpp"
+#include "comp_store.hpp"
 #include "palette.hpp"
 #include "snap.hpp"
 
+#include <atomic>
 #include <imgui.h>
 #include <optional>
 #include <utility>
@@ -34,6 +36,14 @@ class CompView {
      *     palette: colors derived from the Bitwig theme.
      */
     void setPalette(Palette palette) { palette_ = std::move(palette); }
+
+    /**
+     * Enables saving comps to ``store`` and offering them for restore.
+     *
+     * Args:
+     *     store: the local comp store; must outlive the view.
+     */
+    void setStore(CompStore* store) { store_ = store; }
 
     /** Returns whether an interaction is in progress and the UI should redraw continuously. */
     [[nodiscard]] bool animating() const { return drag_.has_value() || redraw_; }
@@ -94,10 +104,26 @@ class CompView {
     void commitRange(ApiClient& client, const State& state, int lane, int a, int b) const;
 
     void drawLog(const State& state);
+    void updateStore(ApiClient& client, const State* state);
+    void drawRestoreOffer(ApiClient& client);
+    [[nodiscard]] const SavedComp* savedFor(const State& state, const std::string& clip) const;
 
     Palette palette_;
     bool stopAtLoopEnd_ = true;
     bool showLog_ = false;
+
+    // Local comp store.
+    CompStore* store_ = nullptr;
+    std::vector<SavedComp> saved_;  ///< Cached list, newest first.
+    double savedListAt_ = -100.0;
+    std::atomic<bool> storeChanged_{false};
+    std::string sessionKey_;  ///< Project and clip of the current session.
+    std::string sessionId_;   ///< File identifier of the current session.
+    std::optional<SavedComp> restoreOffer_;
+    long long lastVersion_ = -1;
+    double lastChange_ = 0.0;
+    std::atomic<long long> savedVersion_{-1};
+    std::atomic<bool> saving_{false};
     Snap snap_ = Snap::Bar;
     float pxPerBar_ = 160.0f;
     std::optional<Drag> drag_;

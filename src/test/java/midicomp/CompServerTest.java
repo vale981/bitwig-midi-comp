@@ -27,8 +27,8 @@ class CompServerTest
    @BeforeEach
    void start() throws IOException
    {
-      server = CompServer.start(18765, 20, (op, params) -> {
-         lastOp.set(op + " " + params);
+      server = CompServer.start(18765, 20, (op, params, body) -> {
+         lastOp.set(op + " " + params + " " + body);
          // Complete asynchronously, as the controller thread would.
          return CompletableFuture.supplyAsync(() -> Json.reply(true, "did " + op));
       }, "{\"name\":\"MIDI Comp\"}");
@@ -122,5 +122,25 @@ class CompServerTest
       final String op = lastOp.get();
       assertTrue(op.startsWith("assign "), op);
       assertTrue(op.contains("take=2") && op.contains("from=0") && op.contains("to=128"), op);
+   }
+
+   @Test
+   void passesRequestBodiesAndRoutesExportAsGet() throws Exception
+   {
+      final HttpResponse<String> post = client.send(
+         HttpRequest.newBuilder(URI.create(server.baseUrl() + "/api/v1/import"))
+            .header("X-Token", server.token())
+            .POST(HttpRequest.BodyPublishers.ofString("{\"format\":1}"))
+            .build(),
+         HttpResponse.BodyHandlers.ofString());
+      assertEquals(200, post.statusCode());
+      assertTrue(lastOp.get().startsWith("import {} {\"format\":1}"), lastOp.get());
+
+      final HttpResponse<String> export = get("/api/v1/export", true);
+      assertEquals(200, export.statusCode());
+      assertTrue(lastOp.get().startsWith("export "), lastOp.get());
+
+      // Other commands still need POST.
+      assertEquals(404, get("/api/v1/assign", true).statusCode());
    }
 }

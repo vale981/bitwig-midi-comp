@@ -22,7 +22,11 @@ import java.util.function.Consumer;
  * that cannot run (the clip is not under its cursor) are kept and run later, in order.
  *
  * In single-pass mode (:meth:`armSinglePass`) the first wrap ends the recording: the capture asks
- * for the transport to stop, collects that pass, and ignores what was recorded after the wrap.
+ * for the transport to stop and, once stopped, takes everything new in the clip as one pass.
+ *
+ * Bitwig may add recorded notes to the clip only when recording ends, or shortly after. The
+ * collection after recording therefore waits until the clip's notes have settled and, if nothing
+ * new has arrived, keeps trying for :member:`FINAL_WAIT_MILLIS` before giving up.
  *
  * All methods run on the controller thread.
  */
@@ -32,6 +36,8 @@ final class LoopCapture
    static final long COLLECT_DELAY_MILLIS = 300;
    /** Notes arriving this long after a wrap may still belong to the previous pass. */
    static final long LATE_NOTE_MILLIS = 500;
+   /** How long the collection after recording waits for recorded notes to show up. */
+   static final long FINAL_WAIT_MILLIS = 3000;
    /** A backwards jump of the transport by more than this many beats counts as a wrap. */
    static final double WRAP_BEATS = 0.25;
 
@@ -40,8 +46,16 @@ final class LoopCapture
    {
    }
 
-   /** A pass waiting to be collected. */
-   private record Due(long at, int pass)
+   /**
+    * A pass waiting to be collected.
+    *
+    * Args:
+    *    at: earliest collection time.
+    *    pass: index of the pass.
+    *    last: the pass that ends the recording; also takes notes assigned to later passes.
+    *    deadline: until when an empty result is retried (only for the last pass).
+    */
+   private record Due(long at, int pass, boolean last, long deadline)
    {
    }
 
@@ -55,11 +69,10 @@ final class LoopCapture
    private long recordingStart;
    private final List<Wrap> wraps = new ArrayList<>();
    private final Deque<Due> due = new ArrayDeque<>();
+   private boolean waitingLogged;
    private boolean singlePass;
    private boolean stopRequested;
    private boolean ignoreStop;
-   /** The recording ended with a completed single pass; notes after it belong to no take. */
-   private boolean dropRest;
 
    /**
     * Args:
@@ -160,7 +173,6 @@ final class LoopCapture
          wraps.clear();
          recordingStart = now;
          wasRecording = true;
-         dropRest = false;
          log.accept(String.format("Recording started (clip %s, %d notes before)",
             available ? "selected" : "NOT selected", baseline.size()));
       }
@@ -168,17 +180,19 @@ final class LoopCapture
       {
          if (wrapped(position, playingStep))
          {
-            wraps.add(new Wrap(now, lastStep, playingStep));
-            due.add(new Due(now + millis(COLLECT_DELAY_MILLIS), wraps.size() - 1));
             log.accept(String.format("Loop wrapped (position %.2f -> %.2f, step %d -> %d)",
                lastPosition, position, lastStep, playingStep));
             if (singlePass)
             {
-               // The pass is complete; what is recorded until the transport stops is dropped.
+               // The pass is complete: stop, then collect everything once recording has ended.
                singlePass = false;
                stopRequested = true;
                ignoreStop = true;
-               dropRest = true;
+            }
+            else
+            {
+               wraps.add(new Wrap(now, lastStep, playingStep));
+               due.add(new Due(now + millis(COLLECT_DELAY_MILLIS), wraps.size() - 1, false, 0));
             }
          }
       }
@@ -186,16 +200,12 @@ final class LoopCapture
       {
          wasRecording = false;
          singlePass = false;
-         if (ignoreStop)
-         {
-            ignoreStop = false;
-            log.accept("Recording stopped at the end of the loop");
-         }
-         else
-         {
-            due.add(new Due(now + millis(COLLECT_DELAY_MILLIS), wraps.size()));
-            log.accept(String.format("Recording stopped after %d wraps", wraps.size()));
-         }
+         log.accept(ignoreStop
+            ? "Recording stopped at the end of the loop"
+            : String.format("Recording stopped after %d wraps", wraps.size()));
+         ignoreStop = false;
+         due.add(new Due(now + millis(COLLECT_DELAY_MILLIS), wraps.size(), true,
+            now + millis(FINAL_WAIT_MILLIS)));
       }
       lastPosition = recording ? position : Double.NaN;
       lastStep = recording ? playingStep : -1;
@@ -203,17 +213,26 @@ final class LoopCapture
       final List<List<NoteData>> collected = new ArrayList<>();
       while (!due.isEmpty() && due.peekFirst().at() <= now)
       {
+         final Due next = due.peekFirst();
          if (!available)
          {
-            log.accept("Pass ready but the clip is not selected; waiting");
+            if (!waitingLogged)
+               log.accept("Pass ready but the clip is not selected; waiting");
+            waitingLogged = true;
             break;
          }
-         final Due next = due.pollFirst();
-         final boolean last = due.isEmpty() && !recording && !dropRest;
-         final List<NoteData> pass = collect(clip, next.pass(), last);
+         // Recorded notes may still be arriving after the recording ended.
+         if (next.last() && !clip.isSettled(LiveSync.SETTLE_MILLIS))
+            break;
+         final List<NoteData> pass = collect(clip, next.pass(), next.last());
+         if (pass.isEmpty() && next.last() && now < next.deadline())
+            break;
+         due.pollFirst();
+         waitingLogged = false;
          if (pass.isEmpty())
          {
-            log.accept(String.format("Pass %d: no new notes", next.pass() + 1));
+            log.accept(String.format("Pass %d: no new notes%s", next.pass() + 1,
+               next.last() ? " arrived after recording" : ""));
             continue;
          }
          passes++;

@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cfloat>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <ctime>
 #include <string>
 #include <utility>
 
@@ -13,6 +16,39 @@ namespace {
 
 std::string str(const int value) {
     return std::to_string(value);
+}
+
+std::int64_t unixNow() {
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+/** Formats a Unix time as local "Mon 12, 14:03". */
+std::string formatTime(const std::int64_t seconds) {
+    const auto t = static_cast<std::time_t>(seconds);
+    const std::tm* local = std::localtime(&t);
+    if (local == nullptr)
+        return "?";
+    std::array<char, 32> buffer{};
+    std::strftime(buffer.data(), buffer.size(), "%b %d, %H:%M", local);
+    return buffer.data();
+}
+
+/** Returns a file-name friendly identifier for a new session, e.g. "20261107-140312". */
+std::string sessionStamp() {
+    const auto t = static_cast<std::time_t>(unixNow());
+    const std::tm* local = std::localtime(&t);
+    std::array<char, 32> buffer{};
+    if (local != nullptr)
+        std::strftime(buffer.data(), buffer.size(), "%Y%m%d-%H%M%S", local);
+    return buffer.data();
+}
+
+/** A comp is worth saving once it holds more than the clip's original notes. */
+bool worthSaving(const State& state) {
+    return state.takes.size() >= 2 ||
+           (state.takes.size() == 1 && state.takes[0].name != "Original");
 }
 
 bool insideSegmentOf(const State& state, const int take, const int x) {
@@ -26,9 +62,12 @@ bool insideSegmentOf(const State& state, const int take, const int x) {
 void CompView::draw(ApiClient& client) {
     const auto statePtr = client.state();
     const State* state = statePtr.get();
+    updateStore(client, state);
 
     drawToolbar(client, state);
     ImGui::Separator();
+    if (state != nullptr && state->session)
+        drawRestoreOffer(client);
     if (state != nullptr && showLog_)
         drawLog(*state);
 
@@ -206,6 +245,10 @@ void CompView::drawStart(ApiClient& client, const State& state) {
     y += centered(y, fontSize * 1.6f, palette_.text, "Start comping") + 6.0f * scale;
     y += centered(y, fontSize, palette_.mutedText,
                   "Pick the clip to comp. Loop passes you record into it become takes.") +
+         4.0f * scale;
+    y += centered(y, fontSize, palette_.mutedText,
+                  "Arranger clips must stay selected (any clip on their track) for edits to "
+                  "apply; launcher clips need not.") +
          24.0f * scale;
 
     // One card per place a clip can be selected.
@@ -234,6 +277,12 @@ void CompView::drawStart(ApiClient& client, const State& state) {
         if (ready) {
             dl->AddText(font, fontSize * 1.25f, ImVec2(a.x + pad, nameY), palette_.text,
                         sel->c_str());
+            if (const SavedComp* saved = savedFor(state, *sel)) {
+                const std::string note =
+                    "Saved comp: " + str(saved->takes) + " takes, " + formatTime(saved->savedAt);
+                dl->AddText(ImVec2(a.x + pad, nameY + fontSize * 1.6f), palette_.mutedText,
+                            note.c_str());
+            }
         } else {
             dl->AddText(font, fontSize * 1.25f, ImVec2(a.x + pad, nameY), palette_.mutedText,
                         "Nothing selected");
@@ -359,21 +408,19 @@ void CompView::drawSessionStatus(const State& state) {
     if (s.recording) {
         ImGui::TextColored(color(palette_.error), "Recording pass %d", s.passes + 1);
     } else if (!s.available) {
-        ImGui::TextColored(color(palette_.warning), "Select it in the %s to apply changes",
-                           s.source == "launcher" ? "clip launcher" : "arranger");
+        ImGui::TextColored(color(palette_.warning), "%s",
+                           s.pending ? "Changes waiting: select a clip on its track"
+                                     : "Select a clip on its track to follow changes");
+        ImGui::SetItemTooltip(
+            "Bitwig only lets extensions edit the selected arranger clip. Any clip on the comp "
+            "clip's track counts,\nincluding one Bitwig creates while recording. Launcher clips "
+            "do not have this limit.");
     } else if (s.pending) {
         ImGui::TextColored(color(palette_.warning), "Syncing");
     } else {
         ImGui::TextColored(color(palette_.live), "Live");
     }
 
-    if (!s.overdub) {
-        ImGui::SameLine();
-        ImGui::TextColored(color(palette_.warning), "Overdub is off");
-        ImGui::SetItemTooltip("Without overdub, Bitwig records into a new clip on top of the comp "
-                              "clip. Turn %s overdub back on.",
-                              s.source == "launcher" ? "launcher" : "arranger");
-    }
     if (s.truncated) {
         ImGui::SameLine();
         ImGui::TextColored(color(palette_.warning), "Clip shorter than comp");
@@ -795,6 +842,79 @@ void CompView::drawLog(const State& state) {
             ImGui::SetScrollHereY(1.0f);
     }
     ImGui::End();
+}
+
+void CompView::updateStore(ApiClient& client, const State* state) {
+    if (store_ == nullptr)
+        return;
+    const double now = ImGui::GetTime();
+    if (storeChanged_.exchange(false) || now - savedListAt_ > 5.0) {
+        saved_ = store_->list();
+        savedListAt_ = now;
+    }
+    if (state == nullptr || !state->session) {
+        sessionKey_.clear();
+        restoreOffer_.reset();
+        return;
+    }
+
+    // A new session gets its own file, and is offered the newest earlier comp of the clip.
+    const std::string key = state->project + "\n" + state->session->label;
+    if (key != sessionKey_) {
+        sessionKey_ = key;
+        sessionId_ = sessionStamp();
+        savedVersion_ = -1;
+        lastVersion_ = -1;
+        restoreOffer_ = store_->newestFor(state->project, state->session->label, sessionId_);
+    }
+
+    // Save shortly after the state stops changing.
+    if (!worthSaving(*state) || state->version == savedVersion_ || saving_)
+        return;
+    if (state->version != lastVersion_) {
+        lastVersion_ = state->version;
+        lastChange_ = now;
+        return;
+    }
+    if (now - lastChange_ < 1.5)
+        return;
+    saving_ = true;
+    const long long version = state->version;
+    client.fetch("export", [this, version, id = sessionId_](std::optional<std::string> doc) {
+        if (doc && store_->save(id, *doc, unixNow()))
+            storeChanged_ = true;
+        savedVersion_ = version;
+        saving_ = false;
+    });
+}
+
+void CompView::drawRestoreOffer(ApiClient& client) {
+    if (!restoreOffer_)
+        return;
+    const SavedComp offer = *restoreOffer_;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(palette_.accent),
+                       "Saved comp of this clip from %s with %d takes.",
+                       formatTime(offer.savedAt).c_str(), offer.takes);
+    ImGui::SameLine();
+    if (ImGui::Button("Restore")) {
+        if (const auto document = store_->load(offer))
+            client.send("import", {}, *document);
+        restoreOffer_.reset();
+    }
+    ImGui::SetItemTooltip("Replace the current takes with the saved comp");
+    ImGui::SameLine();
+    if (ImGui::Button("Dismiss"))
+        restoreOffer_.reset();
+    ImGui::Separator();
+}
+
+const SavedComp* CompView::savedFor(const State& state, const std::string& clip) const {
+    for (const auto& comp : saved_) {
+        if (comp.project == state.project && comp.clip == clip)
+            return &comp;
+    }
+    return nullptr;
 }
 
 }  // namespace midicomp

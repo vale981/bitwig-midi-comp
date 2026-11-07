@@ -115,13 +115,25 @@ bool ApiClient::busy() const {
     return commandInFlight_ || !commands_.empty();
 }
 
-void ApiClient::send(std::string op, std::vector<Param> params) {
+void ApiClient::send(std::string op, std::vector<Param> params, std::string body) {
     {
         const std::scoped_lock lock(mutex_);
-        commands_.push_back(Command{.op = std::move(op), .params = std::move(params)});
+        commands_.push_back(Command{.op = std::move(op),
+                                    .params = std::move(params),
+                                    .body = std::move(body),
+                                    .onDocument = {}});
     }
     wake_.notify_all();
     notify();
+}
+
+void ApiClient::fetch(std::string op, std::function<void(std::optional<std::string>)> done) {
+    {
+        const std::scoped_lock lock(mutex_);
+        commands_.push_back(
+            Command{.op = std::move(op), .params = {}, .body = {}, .onDocument = std::move(done)});
+    }
+    wake_.notify_all();
 }
 
 std::optional<Endpoint> ApiClient::currentEndpoint() {
@@ -234,7 +246,7 @@ void ApiClient::commandLoop() {
                 return;
             command = std::move(commands_.front());
             commands_.pop_front();
-            commandInFlight_ = true;
+            commandInFlight_ = !command.onDocument;
         }
         notify();
 
@@ -246,14 +258,35 @@ void ApiClient::commandLoop() {
             separator = '&';
         }
 
+        const auto endpoint = readEndpoint(endpointPath_);
+        if (command.onDocument) {
+            // Document requests are silent: they do not change the status message.
+            std::optional<std::string> document;
+            if (endpoint) {
+                httplib::Client client(endpoint->url);
+                client.set_connection_timeout(2, 0);
+                client.set_read_timeout(10, 0);
+                const auto result = client.Get(path, authHeaders(*endpoint));
+                if (result && result->status == 200 &&
+                    result->body.find("\"ok\":false") == std::string::npos)
+                    document = result->body;
+            }
+            command.onDocument(std::move(document));
+            const std::scoped_lock lock(mutex_);
+            commandInFlight_ = false;
+            continue;
+        }
+
         Reply reply;
-        if (const auto endpoint = readEndpoint(endpointPath_); !endpoint) {
+        if (!endpoint) {
             reply = Reply{.ok = false, .message = "The extension is not running"};
         } else {
             httplib::Client client(endpoint->url);
             client.set_connection_timeout(2, 0);
             client.set_read_timeout(10, 0);
-            const auto result = client.Post(path, authHeaders(*endpoint), "", "text/plain");
+            const auto result =
+                client.Post(path, authHeaders(*endpoint), command.body,
+                            command.body.empty() ? "text/plain" : "application/json");
             if (!result)
                 reply = Reply{.ok = false,
                               .message = "Request failed: " + httplib::to_string(result.error())};

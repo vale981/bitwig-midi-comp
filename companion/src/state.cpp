@@ -75,6 +75,7 @@ State parseState(const std::string_view text) {
     s.stepsPerBeat = std::max(1, j.at("stepsPerBeat").get<int>());
     s.barSteps = std::max(1, j.at("barSteps").get<int>());
     s.length = j.at("length").get<int>();
+    s.project = j.value("project", std::string{});
     s.launcherSel = optionalString(j, "launcherSel");
     s.arrangerSel = optionalString(j, "arrangerSel");
     s.canUndoEdit = j.value("canUndoEdit", false);
@@ -87,7 +88,6 @@ State parseState(const std::string_view text) {
             .label = it->at("label").get<std::string>(),
             .available = it->at("available").get<bool>(),
             .recording = it->at("recording").get<bool>(),
-            .overdub = it->value("overdub", true),
             .pending = it->at("pending").get<bool>(),
             .truncated = it->at("truncated").get<bool>(),
             .passes = it->at("passes").get<int>(),

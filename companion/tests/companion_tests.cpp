@@ -1,4 +1,5 @@
 #include "api_client.hpp"
+#include "comp_store.hpp"
 #include "palette.hpp"
 #include "snap.hpp"
 #include "state.hpp"
@@ -48,7 +49,7 @@ constexpr const char* kState = R"({"v":7,"stepsPerBeat":128,"barSteps":512,"leng
 "launcherSel":"Keys / Take 1","arrangerSel":null,"canUndoEdit":true,
 "canRevert":false,"message":"ok",
 "session":{"source":"launcher","label":"Keys / Comp","available":true,"recording":false,
-"overdub":false,"pending":true,"truncated":false,"passes":2,"singlePass":true},
+"pending":true,"truncated":false,"passes":2,"singlePass":true},
 "log":["12:00:00  Recording started"],
 "takes":[{"id":1,"name":"Keys / Take 1","source":"launcher","length":1024,
 "notes":[[0,60,64,0.8,0,-1],[512,67,32.5,0.5,1,-1]]}],
@@ -62,7 +63,7 @@ void testParseState() {
     CHECK(!s.arrangerSel.has_value());
     CHECK(s.canUndoEdit && !s.canRevert);
     CHECK(s.session.has_value() && s.session->pending && s.session->label == "Keys / Comp");
-    CHECK(!s.session->overdub && s.session->passes == 2 && s.session->singlePass);
+    CHECK(s.session->passes == 2 && s.session->singlePass);
     CHECK(s.log.size() == 1 && s.log[0].ends_with("Recording started"));
     CHECK(s.takes.size() == 1 && s.takes[0].notes.size() == 2);
     CHECK(s.takes[0].notes[1].muted && s.takes[0].notes[1].duration == 32.5);
@@ -202,6 +203,47 @@ void testPalette() {
     CHECK((withAlpha(IM_COL32(10, 20, 30, 255), 0.0f) & IM_COL32_A_MASK) == 0);
 }
 
+std::string exportDoc(const std::string& clip, int takes) {
+    std::string doc = R"({"format":1,"project":"Song","clip":")" + clip +
+                      R"(","source":"arranger","stepSize":0.0078125,"takes":[)";
+    for (int i = 0; i < takes; ++i)
+        doc += (i > 0 ? "," : "") + std::string(R"({"name":"Pass","notes":[]})");
+    return doc + R"(],"segments":[]})";
+}
+
+void testCompStore() {
+    const TempDir dir("store");
+    CompStore store(dir.path / "comps");
+    CHECK(store.list().empty());
+
+    CHECK(store.save("s1", exportDoc("Keys (arranger)", 2), 100));
+    CHECK(store.save("s1", exportDoc("Keys (arranger)", 3), 110));  // same session: replaced
+    CHECK(store.save("s2", exportDoc("Keys (arranger)", 4), 200));
+    CHECK(store.save("s3", exportDoc("Bass", 1), 150));
+    CHECK(!store.save("s4", "not json", 300));
+
+    const auto all = store.list();
+    CHECK(all.size() == 3);
+    CHECK(all.front().savedAt == 200 && all.front().takes == 4);
+
+    const auto newest = store.newestFor("Song", "Keys (arranger)", "s2");
+    CHECK(newest.has_value() && newest->session == "s1" && newest->takes == 3);
+    CHECK(!store.newestFor("Other song", "Keys (arranger)", "").has_value());
+
+    const auto document = store.load(*newest);
+    CHECK(document.has_value() && document->find("\"format\":1") != std::string::npos);
+
+    for (int i = 0; i < 15; ++i)
+        store.save("p" + std::to_string(i), exportDoc("Pad", 2), 1000 + i);
+    int pads = 0;
+    for (const auto& comp : store.list())
+        pads += comp.clip == "Pad" ? 1 : 0;
+    CHECK(pads == static_cast<int>(CompStore::kKeepPerClip));
+
+    CHECK(fileComponent("Keys / Take 1 (ä)") == "Keys___Take_1_____");  // ä is two bytes
+    CHECK(fileComponent("") == "untitled");
+}
+
 }  // namespace
 
 int main() {
@@ -215,6 +257,7 @@ int main() {
         {"themeMerge", testThemeMerge},
         {"themeLocate", testThemeLocate},
         {"palette", testPalette},
+        {"compStore", testCompStore},
     };
     for (const auto& [name, test] : tests) {
         const int before = failures;

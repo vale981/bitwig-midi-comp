@@ -104,6 +104,7 @@ endfunction()
 
 add_library(midicomp_core STATIC
   src/api_client.cpp
+  src/comp_store.cpp
   src/palette.cpp
   src/state.cpp
   src/theme.cpp

@@ -95,18 +95,32 @@ class ApiClient {
     [[nodiscard]] bool busy() const;
 
     /**
-     * Queues ``POST /api/v1/<op>?<params>``.
+     * Queues ``POST /api/v1/<op>?<params>``; the reply becomes :meth:`lastReply`.
      *
      * Args:
      *     op: command name.
      *     params: query parameters.
+     *     body: request body, for example a comp for ``import``.
      */
-    void send(std::string op, std::vector<Param> params = {});
+    void send(std::string op, std::vector<Param> params = {}, std::string body = {});
+
+    /**
+     * Queues ``GET /api/v1/<op>`` for a command that returns a document, such as ``export``.
+     *
+     * Args:
+     *     op: command name.
+     *     done: called on a background thread with the document, or ``std::nullopt`` if the
+     *         request failed or the extension declined it.
+     */
+    void fetch(std::string op, std::function<void(std::optional<std::string>)> done);
 
   private:
     struct Command {
         std::string op;
         std::vector<Param> params;
+        std::string body;
+        /** Set for :meth:`fetch`: the request is a GET and the body goes here. */
+        std::function<void(std::optional<std::string>)> onDocument;
     };
 
     void pollLoop();

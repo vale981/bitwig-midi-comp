@@ -38,14 +38,18 @@ final class CompServer
        * Args:
        *    op: command name, the path segment after ``/api/v1/``.
        *    params: query parameters.
+       *    body: request body (empty for GET requests).
        */
-      CompletableFuture<String> submit(String op, Map<String, String> params);
+      CompletableFuture<String> submit(String op, Map<String, String> params, String body);
    }
 
    static final int API_VERSION = 1;
    private static final String PREFIX = "/api/v" + API_VERSION + "/";
    private static final int COMMAND_TIMEOUT_SECONDS = 5;
    private static final int MAX_WAIT_SECONDS = 30;
+   private static final int MAX_BODY_BYTES = 64 * 1024 * 1024;
+   /** Read-only commands answered on the controller thread but requested with GET. */
+   private static final Set<String> GET_COMMANDS = Set.of("export");
 
    private final HttpServer server;
    private final ExecutorService executor;
@@ -199,8 +203,10 @@ final class CompServer
          send(exchange, 200, info);
       else if (method.equals("GET") && op.equals("state"))
          serveState(exchange, params);
+      else if (method.equals("GET") && GET_COMMANDS.contains(op))
+         runCommand(exchange, op, params, "");
       else if (method.equals("POST") && !op.isEmpty() && !op.contains("/"))
-         runCommand(exchange, op, params);
+         runCommand(exchange, op, params, readBody(exchange));
       else
          send(exchange, 404, Json.reply(false, "Not found"));
    }
@@ -243,16 +249,25 @@ final class CompServer
       send(exchange, 200, json);
    }
 
+   private static String readBody(final HttpExchange exchange) throws IOException
+   {
+      final byte[] body = exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+      if (body.length > MAX_BODY_BYTES)
+         throw new IOException("Request body too large");
+      return new String(body, StandardCharsets.UTF_8);
+   }
+
    private void runCommand(
       final HttpExchange exchange,
       final String op,
-      final Map<String, String> params) throws IOException
+      final Map<String, String> params,
+      final String body) throws IOException
    {
       String reply;
       int status = 200;
       try
       {
-         reply = sink.submit(op, params).get(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+         reply = sink.submit(op, params, body).get(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
       }
       catch (final TimeoutException e)
       {

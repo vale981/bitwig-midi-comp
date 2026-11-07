@@ -1,4 +1,5 @@
 #include "api_client.hpp"
+#include "comp_store.hpp"
 #include "comp_view.hpp"
 #include "palette.hpp"
 #include "theme.hpp"
@@ -72,18 +73,21 @@ class ThemeWatcher {
 struct Options {
     fs::path themeDir = Theme::defaultEditorDir();
     fs::path endpoint = midicomp::defaultEndpointPath();
+    fs::path storeDir = midicomp::CompStore::defaultDir();
     std::optional<fs::path> screenshot;
 };
 
 void printUsage() {
-    std::puts("Usage: midicomp-companion [--theme-dir DIR] [--endpoint FILE] [--screenshot FILE]\n"
-              "\n"
-              "  --theme-dir DIR   Bitwig Theme Editor directory (default ~/.bitwig-theme-editor)\n"
-              "  --endpoint FILE   discovery file written by the extension\n"
-              "                    (default ~/.midicomp/endpoint.json)\n"
-              "  --screenshot FILE render for a few seconds, save the window as PPM and exit\n"
-              "\n"
-              "Environment: MIDICOMP_FONT=path/to/font.ttf overrides the UI font.");
+    std::puts(
+        "Usage: midicomp-companion [OPTIONS]\n"
+        "\n"
+        "  --theme-dir DIR    Bitwig Theme Editor directory (default ~/.bitwig-theme-editor)\n"
+        "  --endpoint FILE    discovery file written by the extension\n"
+        "                     (default ~/.midicomp/endpoint.json)\n"
+        "  --store-dir DIR    where saved comps are kept\n"
+        "  --screenshot FILE  render for a few seconds, save the window as PPM and exit\n"
+        "\n"
+        "Environment: MIDICOMP_FONT=path/to/font.ttf overrides the UI font.");
 }
 
 std::optional<Options> parseArgs(const int argc, char** argv) {
@@ -95,6 +99,8 @@ std::optional<Options> parseArgs(const int argc, char** argv) {
             options.themeDir = argv[++i];
         } else if (arg == "--endpoint" && hasValue) {
             options.endpoint = argv[++i];
+        } else if (arg == "--store-dir" && hasValue) {
+            options.storeDir = argv[++i];
         } else if (arg == "--screenshot" && hasValue) {
             options.screenshot = argv[++i];
         } else {
@@ -210,6 +216,8 @@ int main(int argc, char** argv) {
     loadFont(scale);
 
     midicomp::CompView view;
+    midicomp::CompStore store(options->storeDir);
+    view.setStore(&store);
     ThemeWatcher watcher(options->themeDir);
     applyTheme(watcher, view, scale);
 

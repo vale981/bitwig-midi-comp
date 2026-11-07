@@ -13,10 +13,10 @@ import com.bitwig.extension.controller.ControllerExtension;
 import com.bitwig.extension.controller.api.ControllerHost;
 import com.bitwig.extension.controller.api.CursorTrack;
 import com.bitwig.extension.controller.api.PinnableCursorClip;
-import com.bitwig.extension.controller.api.SettableBooleanValue;
 import com.bitwig.extension.controller.api.SettableEnumValue;
 import com.bitwig.extension.controller.api.SettableStringValue;
 import com.bitwig.extension.controller.api.Setting;
+import com.bitwig.extension.controller.api.StringValue;
 import com.bitwig.extension.controller.api.Track;
 import com.bitwig.extension.controller.api.Transport;
 
@@ -73,12 +73,17 @@ public class MidiCompExtension extends ControllerExtension
    }
 
    /** An API command waiting for the controller thread. */
-   private record Command(String op, Map<String, String> params, CompletableFuture<String> reply)
+   private record Command(
+      String op,
+      Map<String, String> params,
+      String body,
+      CompletableFuture<String> reply)
    {
    }
 
    private ControllerHost host;
    private Transport transport;
+   private StringValue project;
 
    /** Follows the selected launcher clip. */
    private CursorTrack launcherTrack;
@@ -103,8 +108,6 @@ public class MidiCompExtension extends ControllerExtension
    private final Deque<HistoryEntry> history = new ArrayDeque<>();
    private double stepSize = RESOLUTION_STEPS[1];
    private boolean wasRecording;
-   /** The user's overdub setting before the session enabled it, restored when the session ends. */
-   private boolean overdubBefore;
 
    private final ConcurrentLinkedQueue<Command> commands = new ConcurrentLinkedQueue<>();
    private CompServer server;
@@ -127,6 +130,8 @@ public class MidiCompExtension extends ControllerExtension
    {
       host = getHost();
 
+      project = host.createApplication().projectName();
+      project.addValueObserver(v -> markDirty());
       transport = host.createTransport();
       transport.timeSignature().numerator().addValueObserver(v -> markDirty());
       transport.timeSignature().denominator().addValueObserver(v -> markDirty());
@@ -136,8 +141,6 @@ public class MidiCompExtension extends ControllerExtension
       transport.isArrangerLoopEnabled().markInterested();
       transport.arrangerLoopStart().markInterested();
       transport.playStartPosition().markInterested();
-      transport.isArrangerOverdubEnabled().addValueObserver(v -> markDirty());
-      transport.isClipLauncherOverdubEnabled().addValueObserver(v -> markDirty());
 
       initLauncherCursors();
       initArrangerCursor();
@@ -258,13 +261,16 @@ public class MidiCompExtension extends ControllerExtension
    // Command plumbing
 
    /** Called on an HTTP thread. */
-   private CompletableFuture<String> enqueue(final String op, final Map<String, String> params)
+   private CompletableFuture<String> enqueue(
+      final String op,
+      final Map<String, String> params,
+      final String body)
    {
       final CompletableFuture<String> reply = new CompletableFuture<>();
       if (!running)
          reply.complete(Json.reply(false, "Extension stopped"));
       else
-         commands.add(new Command(op, params, reply));
+         commands.add(new Command(op, params, body, reply));
       return reply;
    }
 
@@ -276,10 +282,18 @@ public class MidiCompExtension extends ControllerExtension
       Command c;
       while ((c = commands.poll()) != null)
       {
+         if (c.op().equals("export"))
+         {
+            // Returns the document itself rather than a result message.
+            c.reply().complete(live.link() == null
+               ? Json.reply(false, "No comp session")
+               : CompExport.write(model, live.link(), project.get(), stepSize));
+            continue;
+         }
          Result result;
          try
          {
-            result = runCommand(c.op(), c.params());
+            result = c.op().equals("import") ? importComp(c.body()) : runCommand(c.op(), c.params());
          }
          catch (final RuntimeException e)
          {
@@ -314,12 +328,12 @@ public class MidiCompExtension extends ControllerExtension
       StateJson.SessionStatus session = null;
       if (live.link() != null)
          session = new StateJson.SessionStatus(live.link(), sessionAvailable(), isRecording(),
-            overdubSetting(live.link().source()).get(), live.isPending(),
+            live.isPending(),
             clipSteps(sessionClip()) < model.length(), capture.passes(),
             capture.isSinglePass());
 
-      return StateJson.build(stateVersion, model, stepSize, barSteps(), selection, session,
-         !history.isEmpty(), lastMessage, List.copyOf(eventLog));
+      return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
+         session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
    }
 
    private void markDirty()
@@ -559,9 +573,6 @@ public class MidiCompExtension extends ControllerExtension
          model.addTake("Original", ref.source(), lengthInSteps(selected, content), content);
       if (ref.source() == Take.Source.LAUNCHER)
          pinTargetToSelection();
-      // Without overdub, Bitwig records into a new clip on top of the comp clip.
-      overdubBefore = overdubSetting(ref.source()).get();
-      overdubSetting(ref.source()).set(true);
       live.link(ref, content);
       capture.start();
       log("Comping " + ref.label() + " (" + content.size() + " notes)");
@@ -576,19 +587,11 @@ public class MidiCompExtension extends ControllerExtension
          return Result.fail("No comp session");
       live.unlink();
       capture.stop();
-      overdubSetting(old.source()).set(overdubBefore);
       if (old.source() == Take.Source.LAUNCHER)
          unpinTarget();
       model.clear();
       history.clear();
       return Result.ok("Finished comping " + old.label());
-   }
-
-   private SettableBooleanValue overdubSetting(final Take.Source source)
-   {
-      return source == Take.Source.LAUNCHER
-         ? transport.isClipLauncherOverdubEnabled()
-         : transport.isArrangerOverdubEnabled();
    }
 
    /** Returns the cursor that shows the session clip. */
@@ -668,6 +671,31 @@ public class MidiCompExtension extends ControllerExtension
    }
 
    /**
+    * Replaces the session's takes and segments with a comp exported earlier.
+    *
+    * Args:
+    *    json: a document from ``GET /api/v1/export``.
+    */
+   private Result importComp(final String json)
+   {
+      if (live.link() == null)
+         return Result.fail("Start comping a clip first");
+      final CompExport.Imported comp;
+      try
+      {
+         comp = CompExport.read(json, stepSize);
+      }
+      catch (final RuntimeException e)
+      {
+         return Result.fail("Could not read the saved comp: " + e.getMessage());
+      }
+      model.restore(comp.takes(), comp.segments());
+      live.markDirty();
+      log("Restored a saved comp with " + comp.takes().size() + " takes");
+      return Result.ok("Restored " + comp.takes().size() + " takes");
+   }
+
+   /**
     * Records over the arranger loop region into the session clip.
     *
     * Args:
@@ -683,12 +711,9 @@ public class MidiCompExtension extends ControllerExtension
             + "launcher clips in Bitwig");
       if (isRecording())
          return Result.fail("Already recording");
-      if (!sessionAvailable())
-         return Result.fail("Select " + live.link().label() + " in the arranger first");
 
       final double loopStart = transport.arrangerLoopStart().get();
       transport.isArrangerLoopEnabled().set(true);
-      transport.isArrangerOverdubEnabled().set(true);
       transport.playStartPosition().set(loopStart);
       transport.setPosition(loopStart);
       transport.isArrangerRecordEnabled().set(true);

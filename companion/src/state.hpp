@@ -39,7 +39,6 @@ struct Session {
     std::string label;
     bool available = false;   ///< The clip is under its cursor (arranger clips must be selected).
     bool recording = false;   ///< Bitwig is recording into the clip.
-    bool overdub = true;      ///< Overdub is on; without it Bitwig records into a new clip.
     bool pending = false;     ///< Comp changes wait to be written.
     bool truncated = false;   ///< The comp is longer than the clip.
     int passes = 0;           ///< Loop passes recorded in this session.
@@ -52,6 +51,7 @@ struct State {
     int stepsPerBeat = 128;
     int barSteps = 512;
     int length = 0;
+    std::string project;  ///< Name of the open Bitwig project.
     std::optional<std::string> launcherSel;
     std::optional<std::string> arrangerSel;
     bool canUndoEdit = false;

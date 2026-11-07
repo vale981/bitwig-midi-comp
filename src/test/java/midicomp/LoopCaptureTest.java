@@ -41,6 +41,19 @@ class LoopCaptureTest
       fake.deliver();
    }
 
+   /** Lets the clip's notes settle, which the collection after recording waits for. */
+   private static void settle()
+   {
+      try
+      {
+         Thread.sleep(LiveSync.SETTLE_MILLIS + 30);
+      }
+      catch (final InterruptedException e)
+      {
+         Thread.currentThread().interrupt();
+      }
+   }
+
    private static boolean hasNoteAt(final List<NoteData> notes, final int x)
    {
       return notes.stream().anyMatch(n -> n.x() == x);
@@ -77,6 +90,7 @@ class LoopCaptureTest
       // Stopping the recording closes pass 2.
       final long stop = System.nanoTime();
       assertTrue(tick(false, 1.0, 120, stop).isEmpty());
+      settle();
       final List<List<NoteData>> second = tick(false, 1.0, 120, stop + COLLECT);
       assertEquals(1, second.size());
       assertEquals(1, second.get(0).size());
@@ -85,7 +99,7 @@ class LoopCaptureTest
    }
 
    @Test
-   void singlePassStopsAtTheLoopEndAndDropsTheRest()
+   void singlePassStopsAtTheLoopEndAndTakesEverythingRecorded()
    {
       capture.armSinglePass();
       tick(true, 0.0, 0, System.nanoTime());
@@ -97,18 +111,60 @@ class LoopCaptureTest
       tick(true, 0.05, 6, wrap);
       assertTrue(capture.takeStopRequest());
       assertFalse(capture.takeStopRequest());
+      // Nothing is collected at the wrap; the pass is read once recording has stopped.
+      assertFalse(capture.isPending());
 
-      // Recorded between the wrap and the stop: not part of the take.
-      record(3, 61);
+      record(2030, 61);
       final long stop = System.nanoTime();
       tick(false, 0.1, 12, stop);
+      settle();
 
       final List<List<NoteData>> passes = tick(false, 0.1, 12, stop + COLLECT);
       assertEquals(1, passes.size());
-      assertEquals(1, passes.get(0).size());
-      assertTrue(hasNoteAt(passes.get(0), 10));
+      assertEquals(2, passes.get(0).size());
       assertFalse(capture.isPending());
       assertFalse(capture.isSinglePass());
+   }
+
+   @Test
+   void notesArrivingAfterTheStopAreStillCollected()
+   {
+      capture.armSinglePass();
+      final long start = System.nanoTime();
+      tick(true, 0.0, 0, start);
+      tick(true, 15.9, 2040, System.nanoTime());
+      tick(true, 0.05, 6, System.nanoTime());
+      final long stop = System.nanoTime();
+      tick(false, 0.1, 12, stop);
+      settle();
+
+      // Bitwig has not delivered the recording yet: keep waiting.
+      assertTrue(tick(false, 0.1, 12, stop + COLLECT).isEmpty());
+      assertTrue(capture.isPending());
+
+      record(100, 60);
+      record(900, 62);
+      settle();
+      final List<List<NoteData>> passes = tick(false, 0.1, 12, stop + 2 * COLLECT);
+      assertEquals(1, passes.size());
+      assertEquals(2, passes.get(0).size());
+      assertFalse(capture.isPending());
+   }
+
+   @Test
+   void anEmptyRecordingGivesUpAfterTheWait()
+   {
+      final long start = System.nanoTime();
+      tick(true, 0.0, 0, start);
+      final long stop = System.nanoTime();
+      tick(false, 0.1, 12, stop);
+      settle();
+      final long deadline = stop + LoopCapture.FINAL_WAIT_MILLIS * 1_000_000L;
+      assertTrue(tick(false, 0.1, 12, deadline - 1).isEmpty());
+      assertTrue(capture.isPending());
+      assertTrue(tick(false, 0.1, 12, deadline + 1).isEmpty());
+      assertFalse(capture.isPending());
+      assertTrue(log.stream().anyMatch(line -> line.contains("no new notes arrived")));
    }
 
    @Test
@@ -122,6 +178,7 @@ class LoopCaptureTest
       record(100, 61);
       final long stop = System.nanoTime();
       tick(false, 0.5, 64, stop);
+      settle();
 
       // Both passes are due, but the clip is not under the cursor.
       assertTrue(capture.tick(clip, false, false, List.of(), 0.5, -1, stop + COLLECT).isEmpty());

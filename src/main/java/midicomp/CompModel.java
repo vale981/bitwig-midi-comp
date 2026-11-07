@@ -153,6 +153,30 @@ final class CompModel
       return true;
    }
 
+   /**
+    * Replaces everything with a restored comp. The undo history is cleared.
+    *
+    * Args:
+    *    restored: takes in order; their identifiers are ignored and reassigned.
+    *    segments: ranges as ``{from, to, takeIndex}`` with indices into ``restored``.
+    */
+   void restore(final List<Take> restored, final List<int[]> segments)
+   {
+      clear();
+      final List<Integer> ids = new ArrayList<>();
+      for (final Take t : restored)
+      {
+         final Take take = new Take(nextId++, t.name(), t.source(), t.length(), List.copyOf(t.notes()));
+         takes.add(take);
+         ids.add(take.id());
+      }
+      final List<Segment> list = new ArrayList<>();
+      for (final int[] s : segments)
+         if (s[1] > s[0])
+            list.add(new Segment(s[0], s[1], ids.get(s[2])));
+      this.segments = merged(list);
+   }
+
    /** Removes all takes and segments. */
    void clear()
    {

@@ -24,7 +24,8 @@ A wrong token gets `401`, another `Host` gets `403`.
 ## Concepts
 
 - **Session**: the clip being comped. Starting a session captures the clip's notes as the first
-  take, switches overdub on, and from then on rewrites the clip whenever the comp changes.
+  take and from then on rewrites the clip whenever the comp changes. Overdub is left alone;
+  without it Bitwig records into a new clip on the same track, which the session follows.
 - **Takes**: copies of notes: loop passes recorded into the session clip, plus clips copied with
   `addTake`. A take does not change when its source clip changes.
 - **Segments**: ranges of the comp and the take that plays there; gaps are silent.
@@ -61,6 +62,7 @@ State document:
   "stepsPerBeat": 128,
   "barSteps": 512,
   "length": 2048,                   // comp length = longest take
+  "project": "My song",             // name of the open project
   "launcherSel": "Keys / Clip 3",   // selected launcher clip, or null
   "arrangerSel": "Keys (arranger)", // selected arranger clip, or null
   "canUndoEdit": true,              // undoEdit available
@@ -71,7 +73,6 @@ State document:
     "label": "Keys (arranger)",
     "available": true,              // the clip is under its cursor (arranger: selected)
     "recording": false,             // Bitwig is recording into the clip
-    "overdub": true,                // overdub is on; without it Bitwig records into a new clip
     "pending": false,               // comp changes wait to be written
     "truncated": false,             // the comp is longer than the clip
     "passes": 3,                    // loop passes recorded in this session
@@ -109,6 +110,26 @@ Bitwig did not process the command within 5 s.
 | `clear`      | `from`, `to`                | Make `[from, to)` silent. |
 | `useTake`    | `take`                      | Use `take` for the whole comp. |
 | `undoEdit`   |                             | Revert the last segment change. |
+| `import`     | body: a document from `export` | Replace the session's takes and segments with a saved comp. |
+
+### `GET /api/v1/export`
+
+Returns the session's comp at full fidelity, for saving: every note attribute, the segments, and
+the step size, so `import` can rescale positions if the timing resolution changed. Returns
+`{"ok": false, ...}` without a session.
+
+```jsonc
+{"format": 1, "project": "My song", "clip": "Keys (arranger)", "source": "arranger",
+ "stepSize": 0.0078125,
+ "takes": [{"name": "Pass 1", "source": "arranger", "length": 2048,
+            "notes": [{"ch": 0, "x": 0, "key": 60, "vel": 0.8, "rel": 0.5, "dur": 0.5,
+                       "pan": 0, "timbre": 0, "pressure": 0, "gain": 0, "transpose": 0,
+                       "chanceOn": false, "chance": 1, "occurrenceOn": false, "occurrence": null,
+                       "recurrenceOn": false, "recurrenceLength": 1, "recurrenceMask": 1,
+                       "repeatOn": false, "repeatCount": 1, "repeatCurve": 0,
+                       "repeatVelEnd": 0, "repeatVelCurve": 0, "spread": 0, "muted": false}]}],
+ "segments": [[0, 2048, 0]]}    // [from, to, take index]
+```
 
 ## Behavior
 
@@ -122,8 +143,9 @@ Bitwig did not process the command within 5 s.
 - While Bitwig records into the clip nothing is written. Each wrap of the loop (transport jump,
   or the clip's playing step jumping back for launcher clips) and the end of recording close a
   pass. New notes are assigned to passes by when they appeared in the clip; a note reported just
-  after a wrap but lying in the second half of the loop still belongs to the pass before. Passes
-  are collected once the clip is under its cursor, so the comp clip should stay selected while
-  recording in the arranger. Afterwards the comp is written over the recording.
+  after a wrap but lying in the second half of the loop still belongs to the pass before. The
+  pass that ends the recording waits until the clip's notes have settled and retries for up to
+  3 s, since Bitwig may add recorded notes only after recording stops. Passes are collected once
+  a clip on the comp clip's track is selected. Afterwards the comp is written over the recording.
 - `log` lists recent capture events (recording start and stop, wraps, collected passes); the
   same lines go to Bitwig's controller console.

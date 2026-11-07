@@ -23,7 +23,6 @@ final class StateJson
     *    clip: the clip being comped.
     *    available: whether the clip is under its cursor (arranger clips must be selected).
     *    recording: whether Bitwig is recording into the clip.
-    *    overdub: whether overdub is on; without it Bitwig records into a new clip.
     *    pending: whether comp changes wait to be written.
     *    truncated: whether the comp is longer than the clip.
     *    passes: loop passes recorded in this session.
@@ -33,7 +32,6 @@ final class StateJson
       ClipRef clip,
       boolean available,
       boolean recording,
-      boolean overdub,
       boolean pending,
       boolean truncated,
       int passes,
@@ -53,6 +51,7 @@ final class StateJson
     *    model: takes and segments.
     *    stepSize: grid step length in beats.
     *    barSteps: steps per bar.
+    *    project: name of the open project.
     *    selection: selected clips.
     *    session: comp session status, or ``null`` without a session.
     *    canRevert: whether the session clip's original content can be restored.
@@ -67,6 +66,7 @@ final class StateJson
       final CompModel model,
       final double stepSize,
       final int barSteps,
+      final String project,
       final Selection selection,
       final SessionStatus session,
       final boolean canRevert,
@@ -78,6 +78,7 @@ final class StateJson
          .append(",\"stepsPerBeat\":").append(Math.round(1.0 / stepSize))
          .append(",\"barSteps\":").append(barSteps)
          .append(",\"length\":").append(model.length())
+         .append(",\"project\":").append(Json.quote(project))
          .append(",\"launcherSel\":").append(Json.quote(selection.launcher()))
          .append(",\"arrangerSel\":").append(Json.quote(selection.arranger()))
          .append(",\"canUndoEdit\":").append(model.canUndo())
@@ -97,7 +98,6 @@ final class StateJson
             .append(",\"label\":").append(Json.quote(session.clip().label()))
             .append(",\"available\":").append(session.available())
             .append(",\"recording\":").append(session.recording())
-            .append(",\"overdub\":").append(session.overdub())
             .append(",\"pending\":").append(session.pending())
             .append(",\"truncated\":").append(session.truncated())
             .append(",\"passes\":").append(session.passes())

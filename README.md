@@ -23,13 +23,10 @@ Two parts:
    from the loop start and records into the clip. With *Stop at loop end* (default) it stops when
    the loop wraps and the pass becomes one take; without it every repetition becomes a take until
    you press *Stop*. Recording in Bitwig directly works as well (each loop pass becomes a take);
-   launcher clips are recorded that way. Keep the comp clip selected while recording in the
-   arranger.
-
-   The session switches Bitwig's overdub on (arranger or launcher, matching the clip) so that
-   Bitwig records into the clip instead of creating a new clip on top of it; the previous setting
-   is restored when the session ends. *Log* shows what the extension saw (recording, loop wraps,
-   collected passes), which helps when a pass does not show up.
+   launcher clips are recorded that way. Overdub is left as you set it: without it Bitwig records
+   into a new clip on top of the comp clip, which then becomes the comp clip. *Log* shows what the
+   extension saw (recording, loop wraps, collected passes), which helps when a pass does not show
+   up.
 
    ![Waiting for the first pass](docs/screenshots/record.png)
 
@@ -52,7 +49,21 @@ pointer, `0` or `Delete` clears it, `Ctrl+Z` undoes the last edit, `Ctrl`+wheel 
 
 **Overwriting.** The comp clip is always overwritten with the comp: edits made to it directly in
 Bitwig are replaced at the next comp change, and recorded passes are replaced once recording
-stops (by then they are takes).
+stops (by then they are takes). Comps are built from the full notes (every attribute the API
+exposes); the companion only displays a reduced form.
+
+**Selection (arranger).** Bitwig only lets extensions read and write the *selected* arranger
+clip, and arranger clips cannot be pinned. Any clip on the comp clip's track counts, so selecting
+something on another track pauses writing ("Changes waiting") until a clip on that track is
+selected again. Launcher clips are pinned by the session and have no such limit.
+
+**Saved comps.** The companion saves the current comp shortly after every change, one file per
+session, keeping the ten newest per clip. When you comp a clip with a saved comp in the same
+project, a banner offers *Restore*, and the start screen notes it. Files live in
+`~/.local/share/midicomp/comps` (Linux, or `$XDG_DATA_HOME`), `~/Library/Application
+Support/midicomp/comps` (macOS) or `%APPDATA%\midicomp\comps` (Windows); `--store-dir`
+changes it. Saved comps contain every note attribute and are restored at full fidelity, also
+after a change of the timing resolution.
 
 ## Installation
 
@@ -72,6 +83,7 @@ The controller preferences contain the timing resolution (see Limitations).
 
 - `--theme-dir DIR`: Bitwig Theme Editor directory (default `~/.bitwig-theme-editor`).
 - `--endpoint FILE`: discovery file (default `~/.midicomp/endpoint.json`).
+- `--store-dir DIR`: where saved comps are kept.
 - `--screenshot FILE`: render for three seconds, save the window as PPM and exit.
 - `MIDICOMP_FONT=/path/to/font.ttf`: UI font. Release builds embed Roboto; the Nix build uses Inter.
 
@@ -135,9 +147,9 @@ On NixOS, point `LD_LIBRARY_PATH` at Mesa's `lib` directory and set
 - **Copied attributes.** Velocity, release velocity, duration, pan, timbre, pressure, gain,
   transpose, chance, occurrence, recurrence, repeats and mute. Drawn per-note expression curves and
   clip automation (CC, pitch bend) are not exposed by the API and are not copied.
-- **Arranger clips** are identified by track; the API exposes no clip position. The comp clip must
-  stay selected in the arranger for changes to be written (the status shows when it is not).
-  Clips must not be trimmed on the left edge, and clip loops must not repeat inside the comp.
+- **Arranger clips** are identified by track; the API exposes no clip position. A clip on the comp
+  clip's track must be selected for changes to be written (see Selection). Clips must not be
+  trimmed on the left edge, and clip loops must not repeat inside the comp.
 - **Clip length.** Nothing is written past the end of the comp clip; the status shows when the
   comp is longer than the clip.
 - **Undo.** Each note edit is a separate step in Bitwig's undo history. *Undo edit* in the
