@@ -17,7 +17,7 @@
             !(builtins.elem (baseNameOf path) [ "build" "compile_commands.json" ".cache" ]);
         };
         nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
-        buildInputs = [ pkgs.glfw pkgs.imgui pkgs.httplib pkgs.nlohmann_json pkgs.libGL ];
+        buildInputs = [ pkgs.glfw pkgs.imgui pkgs.httplib pkgs.nlohmann_json pkgs.libGL pkgs.rtmidi pkgs.alsa-lib ];
         cmakeFlags = [ "-DMIDICOMP_DEFAULT_FONT=${fontFor pkgs}" ];
         doCheck = true;
       };

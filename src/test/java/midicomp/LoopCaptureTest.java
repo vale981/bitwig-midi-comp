@@ -25,7 +25,7 @@ class LoopCaptureTest
    {
       fake = new FakeClip();
       clip = new EditableClip(fake.clip, STEP);
-      capture = new LoopCapture(log::add);
+      capture = new LoopCapture(log::add, 0);
       capture.start();
    }
 

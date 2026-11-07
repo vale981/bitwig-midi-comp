@@ -95,7 +95,7 @@ Note arrays: `x` start step, `key` MIDI key (0-127), `durationSteps` (may be fra
 
 ### `POST /api/v1/<command>?<parameters>`
 
-Parameters go in the query string; the body is ignored. Every command returns
+Parameters go in the query string; only `import` and `played` read the body. Every command returns
 `{"ok": true|false, "message": "…"}` with status `200`, also when `ok` is false. `504` means
 Bitwig did not process the command within 5 s.
 
@@ -103,7 +103,7 @@ Bitwig did not process the command within 5 s.
 |--------------|-----------------------------|--------|
 | `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. The grid resolution is chosen for the clip; if it changes, the clip is re-read first and the reply says "Preparing". |
 | `end`        |                             | End the session; the clip keeps the comp. |
-| `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start. Passes become takes (sorted by the MIDI input, see below); the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
+| `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start. Passes become takes (assembled with the keyboard notes from `played`, see below); the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
 | `stopRecording` |                          | Stop the transport and arranger recording. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
 | `addTake`    | `source=launcher\|arranger` | Copy the selected clip's notes as a new take. |
@@ -113,6 +113,22 @@ Bitwig did not process the command within 5 s.
 | `useTake`    | `take`                      | Use `take` for the whole comp. |
 | `undoEdit`   |                             | Revert the last segment change. |
 | `import`     | body: a document from `export` | Replace the session's takes and segments with a saved comp. |
+| `played`     | body: keyboard messages     | Store note messages played on the keyboard, for assembling loop recordings. Does not change the status or the state version. |
+
+The body of `played`:
+
+```jsonc
+{"now": 1234568000000,                       // sender's monotonic clock at sending, µs
+ "events": [[1234567890123, 144, 60, 100],   // [time µs, status, data1, data2]
+            [1234567990123, 128, 60, 0]]}
+```
+
+Times are on the monotonic clock (`CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS,
+`QueryPerformanceCounter` on Windows), which Java's `System.nanoTime()` also uses. The extension
+estimates the offset between the clocks as the smallest difference between its time of arrival
+and `now` over the last minute, so a different clock base still works. Only note-on and note-off
+messages are used; the companion takes the time of each message from the MIDI driver's
+timestamps rather than from its arrival. Messages are kept for 15 minutes.
 
 ### `GET /api/v1/export`
 
@@ -152,10 +168,20 @@ the step size, so `import` can rescale positions if the timing resolution change
   pass that ends the recording waits until the clip's notes have settled and retries for up to
   3 s, since Bitwig may add recorded notes only after recording stops. Passes are collected once
   a clip on the comp clip's track is selected. Afterwards the comp is written over the recording.
-- Bitwig hides arranger clips from extensions while recording. For arranger recordings, the
-  notes played on the extension's MIDI input (or, without it, the notes the comp track plays) are
-  logged with pass and loop position, and the recorded notes are sorted into passes by matching
-  them per key, in order of loop position, within 80 ms. Unmatched notes go to the last pass. The
-  takes consist of the recorded notes; the observed notes only decide the pass.
+- Bitwig hides arranger clips from extensions while recording, and without overdub keeps only
+  the most recent pass at each loop position. For arranger recordings the extension samples the
+  transport position against `System.nanoTime()`; each pass is fitted as a line with the
+  tempo's slope, which averages out the screen-rate updates. Each keyboard note from `played` is
+  placed in a pass and loop position with it. When recording ends, recorded notes are matched to
+  played notes per key, in order of loop position (no crossings), within 80 ms. Matched recorded
+  notes go to their played note's pass unchanged; unmatched played notes (overwritten passes) are
+  rebuilt with attributes from a recorded note; unmatched recorded notes go to the last pass. The
+  offset between played and recorded positions is estimated from the recording; rounded to a
+  sixteenth note it is the loop start in the clip, and the rest is a constant delay that is
+  removed from the played notes before passes are assigned. The log reports the counts, the
+  delay, the remaining deviation and the clock offset. A possible refinement is to time the
+  transport by Bitwig's MIDI clock output (timestamped by the companion's MIDI driver like the
+  notes) instead of the screen-rate position updates. Wraps within 300 ms of the recording start
+  are ignored (Bitwig reports a jump to the loop start there).
 - `log` lists recent capture events (recording start and stop, wraps, collected passes); the
   same lines go to Bitwig's controller console.

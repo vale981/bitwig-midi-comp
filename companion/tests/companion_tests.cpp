@@ -1,5 +1,6 @@
 #include "api_client.hpp"
 #include "comp_store.hpp"
+#include "midi_input.hpp"
 #include "palette.hpp"
 #include "snap.hpp"
 #include "state.hpp"
@@ -244,6 +245,38 @@ void testCompStore() {
     CHECK(fileComponent("") == "untitled");
 }
 
+void testMidi() {
+    // The message delivered with the least delay sets the anchor; earlier ones are corrected.
+    TimestampAnchor anchor;
+    const double first = anchor.add(0.0, 1'000'300);   // 300 µs late
+    const double second = anchor.add(0.5, 1'500'050);  // 50 µs late
+    const double third = anchor.add(0.25, 1'750'900);  // 900 µs late
+    CHECK(anchor.place(first) == 1'000'050);
+    CHECK(anchor.place(second) == 1'500'050);
+    CHECK(anchor.place(third) == 1'750'050);
+    anchor.reset();
+    CHECK(anchor.place(anchor.add(3.0, 7)) == 7);  // the first delta after a reset is ignored
+
+    const std::vector<MidiEvent> events{
+        {.timeMicros = 1'234'567'890'123, .status = 0x90, .data1 = 60, .data2 = 100},
+        {.timeMicros = 1'234'567'990'123, .status = 0x80, .data1 = 60, .data2 = 0}};
+    CHECK(
+        playedJson(events, 1'234'568'000'000) ==
+        R"({"events":[[1234567890123,144,60,100],[1234567990123,128,60,0]],"now":1234568000000})");
+
+    CHECK(portKey("USB Axiom 61:USB Axiom 61 MIDI 1 20:0") == "USB Axiom 61:USB Axiom 61 MIDI 1");
+    CHECK(portKey("Axiom 61") == "Axiom 61");
+    CHECK(portKey("Port 2") == "Port 2");
+
+    const std::vector<std::string> ports{"Midi Through:Midi Through Port-0 14:0",
+                                         "USB Axiom 61:USB Axiom 61 MIDI 1 24:0",
+                                         "Launchpad:Launchpad MIDI 1 28:0"};
+    CHECK(choosePort(ports, "") == 1u);
+    CHECK(choosePort(ports, "Launchpad:Launchpad MIDI 1") == 2u);
+    CHECK(!choosePort(ports, "Gone").has_value());
+    CHECK(!choosePort({"Midi Through:Midi Through Port-0 14:0"}, "").has_value());
+}
+
 }  // namespace
 
 int main() {
@@ -258,6 +291,7 @@ int main() {
         {"themeLocate", testThemeLocate},
         {"palette", testPalette},
         {"compStore", testCompStore},
+        {"midi", testMidi},
     };
     for (const auto& [name, test] : tests) {
         const int before = failures;

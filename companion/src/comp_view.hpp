@@ -2,6 +2,7 @@
 
 #include "api_client.hpp"
 #include "comp_store.hpp"
+#include "midi_input.hpp"
 #include "palette.hpp"
 #include "snap.hpp"
 
@@ -44,6 +45,15 @@ class CompView {
      *     store: the local comp store; must outlive the view.
      */
     void setStore(CompStore* store) { store_ = store; }
+
+    /**
+     * Enables the keyboard input: a port picker in the toolbar, and forwarding of the played
+     * notes to the extension during comp sessions.
+     *
+     * Args:
+     *     midi: the keyboard input; must outlive the view.
+     */
+    void setMidi(MidiInput* midi) { midi_ = midi; }
 
     /** Returns whether an interaction is in progress and the UI should redraw continuously. */
     [[nodiscard]] bool animating() const { return drag_.has_value() || redraw_; }
@@ -103,6 +113,8 @@ class CompView {
     [[nodiscard]] int gridSteps(const State& state) const;
     void commitRange(ApiClient& client, const State& state, int lane, int a, int b) const;
 
+    void drawMidiPicker();
+    void forwardMidi(ApiClient& client, const State* state);
     void drawLog(const State& state);
     void updateStore(ApiClient& client, const State* state);
     void drawRestoreOffer(ApiClient& client);
@@ -112,6 +124,11 @@ class CompView {
     bool stopAtLoopEnd_ = true;
     bool showLog_ = false;
     double pendingSince_ = -1.0;  ///< When the current pending write was first seen.
+
+    // Keyboard input.
+    MidiInput* midi_ = nullptr;
+    std::vector<std::string> midiPorts_;  ///< Listed when the picker opens.
+    std::int64_t lastMidiPost_ = 0;
 
     // Local comp store.
     CompStore* store_ = nullptr;

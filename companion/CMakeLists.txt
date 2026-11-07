@@ -71,6 +71,33 @@ if(NOT nlohmann_json_FOUND)
   FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
+# RtMidi's package (and its own build) needs the ALSA headers on Linux.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(ALSA REQUIRED)
+endif()
+find_package(RtMidi CONFIG QUIET)
+if(NOT RtMidi_FOUND)
+  if(NOT MIDICOMP_FETCH_DEPS)
+    message(FATAL_ERROR "RtMidi not found and MIDICOMP_FETCH_DEPS is off")
+  endif()
+  # RtMidi enables a MIDI API only if it finds it, and otherwise builds without any; enable the
+  # platform's API explicitly so that a missing dependency fails here.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(RTMIDI_API_ALSA ON CACHE BOOL "" FORCE)
+  endif()
+  set(RTMIDI_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+  set(RTMIDI_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+  set(RTMIDI_API_JACK OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(rtmidi
+    URL https://github.com/thestk/rtmidi/archive/refs/tags/6.0.0.tar.gz
+    URL_HASH SHA256=ef7bcda27fee6936b651c29ebe9544c74959d0b1583b716ce80a1c6fea7617f0
+    SYSTEM)
+  FetchContent_MakeAvailable(rtmidi)
+  if(NOT TARGET RtMidi::rtmidi)
+    add_library(RtMidi::rtmidi ALIAS rtmidi)
+  endif()
+endif()
+
 # cpp-httplib is used header-only and without TLS, so its CMake package (which requires OpenSSL)
 # is not needed.
 find_path(HTTPLIB_INCLUDE_DIR httplib.h)
@@ -105,13 +132,15 @@ endfunction()
 add_library(midicomp_core STATIC
   src/api_client.cpp
   src/comp_store.cpp
+  src/midi_input.cpp
   src/palette.cpp
   src/state.cpp
   src/theme.cpp
 )
 target_include_directories(midicomp_core PUBLIC src)
 target_include_directories(midicomp_core SYSTEM PRIVATE ${HTTPLIB_INCLUDE_DIR})
-target_link_libraries(midicomp_core PUBLIC imgui::imgui nlohmann_json::nlohmann_json Threads::Threads)
+target_link_libraries(midicomp_core PUBLIC imgui::imgui nlohmann_json::nlohmann_json Threads::Threads
+  RtMidi::rtmidi)
 if(WIN32)
   target_link_libraries(midicomp_core PUBLIC ws2_32)
 endif()

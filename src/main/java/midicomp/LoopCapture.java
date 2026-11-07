@@ -46,6 +46,11 @@ final class LoopCapture
    static final long FINAL_WAIT_MILLIS = 3000;
    /** A backwards jump of the transport by more than this many beats counts as a wrap. */
    static final double WRAP_BEATS = 0.25;
+   /**
+    * Jumps this soon after recording starts are the playhead moving to the loop start, not
+    * wraps.
+    */
+   static final long START_GUARD_MILLIS = 300;
 
    /** A loop wrap: when it happened and the clip's playing step just before and after it. */
    private record Wrap(long time, int stepBefore, int stepAfter)
@@ -66,6 +71,7 @@ final class LoopCapture
    }
 
    private final Consumer<String> log;
+   private final long startGuardNanos;
    private boolean active;
    private Map<Long, NoteData> baseline = new HashMap<>();
    /** Notes already taken while clearing, by cell, with their arrival time. */
@@ -90,7 +96,18 @@ final class LoopCapture
     */
    LoopCapture(final Consumer<String> log)
    {
+      this(log, START_GUARD_MILLIS);
+   }
+
+   /**
+    * Args:
+    *    log: receives a line for each capture event, for diagnostics.
+    *    startGuardMillis: jumps this soon after recording starts are not counted as wraps.
+    */
+   LoopCapture(final Consumer<String> log, final long startGuardMillis)
+   {
       this.log = log;
+      this.startGuardNanos = startGuardMillis * 1_000_000L;
    }
 
    int passes()
@@ -227,7 +244,7 @@ final class LoopCapture
       }
       else if (recording)
       {
-         if (wrapped(position, playingStep))
+         if (now - recordingStart > startGuardNanos && wrapped(position, playingStep))
          {
             log.accept(String.format(
                "Loop wrapped (position %.2f -> %.2f, step %d -> %d); clip shows %d notes, %d new",
@@ -288,7 +305,8 @@ final class LoopCapture
             clearPasses = false;
             splitter = null;
          }
-         if (pass.isEmpty())
+         // With a splitter, takes can come from other sources even without new clip notes.
+         if (pass.isEmpty() && split == null)
          {
             log.accept(String.format("Pass %d: no new notes%s", next.pass() + 1,
                next.last() ? " arrived after recording" : ""));

@@ -63,6 +63,7 @@ void CompView::draw(ApiClient& client) {
     const auto statePtr = client.state();
     const State* state = statePtr.get();
     updateStore(client, state);
+    forwardMidi(client, state);
 
     drawToolbar(client, state);
     ImGui::Separator();
@@ -170,6 +171,8 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
     }
     if (state != nullptr && state->session)
         ImGui::SameLine();
+    drawMidiPicker();
+    ImGui::SameLine();
     const float logWidth =
         ImGui::CalcTextSize("Hide log").x + 2.0f * ImGui::GetStyle().FramePadding.x;
     if (ImGui::Button(showLog_ ? "Hide log" : "Log", ImVec2(logWidth, 0)))
@@ -367,6 +370,59 @@ float CompView::drawSteps(ImDrawList* dl, const ImVec2 origin, const float width
     return 2.0f * radius;
 }
 
+void CompView::drawMidiPicker() {
+    if (midi_ == nullptr)
+        return;
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    const float h = ImGui::GetFrameHeight();
+    const std::string port = midi_->portName();
+
+    // Activity light: lit briefly by each note.
+    const double age = static_cast<double>(monotonicMicros() - midi_->lastNoteMicros()) * 1e-6;
+    const bool lit = !port.empty() && midi_->lastNoteMicros() != 0 && age < 0.15;
+    if (lit)
+        redraw_ = true;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddCircleFilled(
+        ImVec2(p.x + h * 0.35f, p.y + h * 0.5f), h * 0.18f,
+        lit ? palette_.live : (port.empty() ? palette_.warning : palette_.mutedText));
+    ImGui::Dummy(ImVec2(h * 0.7f, h));
+    ImGui::SameLine(0.0f, 0.0f);
+
+    const std::string preview = !midi_->available() ? "No MIDI"
+                                : port.empty()      ? "No keyboard"
+                                                    : portKey(port);
+    ImGui::SetNextItemWidth(170.0f * scale);
+    if (ImGui::BeginCombo("##keyboard", preview.c_str())) {
+        if (ImGui::IsWindowAppearing())
+            midiPorts_ = midi_->ports();
+        if (ImGui::Selectable("None", port.empty()))
+            midi_->close();
+        for (const std::string& name : midiPorts_)
+            if (ImGui::Selectable(portKey(name).c_str(), name == port))
+                midi_->open(name);
+        ImGui::EndCombo();
+    }
+    const std::string error = midi_->error();
+    ImGui::SetItemTooltip("Keyboard to record from. MIDI Comp reads the notes you play, so that "
+                          "every loop pass becomes a take;\nBitwig keeps only the last pass.%s%s",
+                          error.empty() ? "" : "\n\n", error.c_str());
+}
+
+void CompView::forwardMidi(ApiClient& client, const State* state) {
+    if (midi_ == nullptr)
+        return;
+    midi_->reconnect();
+    // Batches of up to a tenth of a second; notes outside comp sessions are not needed.
+    const std::int64_t now = monotonicMicros();
+    if (now - lastMidiPost_ < 100'000)
+        return;
+    lastMidiPost_ = now;
+    const auto events = midi_->take();
+    if (!events.empty() && state != nullptr && state->session)
+        client.post("played", playedJson(events, now));
+}
+
 void CompView::drawRecordHint(const State& state) {
     const Session& session = *state.session;
     const float scale = ImGui::GetFontSize() / 13.0f;
@@ -404,7 +460,12 @@ void CompView::drawRecordHint(const State& state) {
              4.0f * scale;
         y += centered(y, fontSize, palette_.mutedText,
                       "Takes recorded elsewhere can be added with \"Add take\".") +
-             28.0f * scale;
+             4.0f * scale;
+        if (midi_ != nullptr && midi_->portName().empty())
+            y += centered(y, fontSize, palette_.warning,
+                          "No keyboard selected (toolbar): only the last pass can be kept.") +
+                 4.0f * scale;
+        y += 24.0f * scale;
     }
     y += drawSteps(dl, origin, avail.x, y, 1);
     ImGui::Dummy(ImVec2(avail.x, y));

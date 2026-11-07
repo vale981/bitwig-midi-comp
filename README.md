@@ -21,21 +21,28 @@ Two parts:
 
 2. **Record.** Set the loop region over the clip and press *Record* in the companion (arranger
    clips; a clip on the comp track must be selected). It empties the clip, so the comp is not
-   heard, and records from the loop start; overdub is left as you set it. With *Stop at
-   loop end* (default) recording stops after one pass; without it, it continues until you press
-   *Stop*, and every loop pass becomes a take. When recording stops, the comp is written back.
+   heard, and records from the loop start. With *Stop at loop end* (default) recording stops after
+   one pass; without it, it continues until you press *Stop*, and every loop pass becomes a take.
+   When recording stops, the comp is written back.
 
-   Bitwig hides the arranger clip from extensions while it records and merges all passes into
-   it, so the passes are sorted afterwards. While recording, the extension notes which pass and
-   loop position each key was played at, and then matches Bitwig's recorded notes to them. The
-   takes always consist of Bitwig's recorded notes (exact timing, all attributes); the observed
-   notes only decide the pass. They come from the extension's MIDI input if your keyboard is
-   assigned to it, otherwise from the notes the comp track plays (no setup; clip playback on that
-   track would be mixed in, which the log reports). Notes played within a few milliseconds of the
-   same key in another pass may swap passes. Overdub is left as you set it: without it Bitwig records
-   into a new clip on top of the comp clip, which then becomes the comp clip. *Log* shows what the
-   extension saw (recording, loop wraps, collected passes), which helps when a pass does not show
-   up.
+   Without overdub, Bitwig keeps only the most recent pass at each loop position, and it hides
+   the arranger clip from extensions while it records. The companion therefore reads your
+   keyboard itself (picker in the toolbar; it opens the first keyboard it finds and remembers
+   your choice) and sends the notes with their timestamps to the extension, which records the
+   transport position against the same clock. When recording stops, the takes are assembled:
+
+   - Notes Bitwig kept are used as they are (exact timing, every attribute) in the pass they
+     were played in. They are matched to the played notes per key, in order of loop position.
+   - Played notes Bitwig overwrote are rebuilt from the keyboard data: timing from the
+     timestamps, velocities and length from the MIDI messages, other attributes copied from a
+     recorded note.
+   - The constant delay between the keyboard timestamps and Bitwig's recording is measured on
+     the matched notes and removed, also when deciding which pass a note just before or after
+     the loop start belongs to. *Log* reports the remaining deviation in milliseconds.
+
+   Without a keyboard selected, the recording becomes a single take. Bitwig and the companion
+   both need the keyboard (see *Sharing the keyboard* below). *Log* shows what the extension saw
+   (recording, loop wraps, assembled takes).
 
    ![Waiting for the first pass](docs/screenshots/record.png)
 
@@ -81,14 +88,31 @@ Download the extension and the companion for your platform from the
 
 1. Copy `MidiComp.bwextension` to `~/Bitwig Studio/Extensions/` (Windows:
    `Documents\Bitwig Studio\Extensions`).
-2. In Bitwig: *Dashboard > Settings > Controllers > Add controller > Utility > MIDI Comp*. Its MIDI
-   input is optional: if you select your keyboard there, its notes time the loop passes most
-   directly (the extension forwards the keyboard as a note input, so tracks set to *All ins* keep
-   receiving it; with the keyboard on two controllers, set the recording track's input to one of
-   them). Without it, the notes played on the comp track are used. On Linux the keyboard can be
-   duplicated with `snd-virmidi` and `aconnect` to use it on both controllers.
+2. In Bitwig: *Dashboard > Settings > Controllers > Add controller > Utility > MIDI Comp*. It
+   has no MIDI ports.
 3. Start `midicomp-companion`. It finds the extension through `~/.midicomp/endpoint.json`, which
-   the extension writes on startup, and reconnects when the extension restarts.
+   the extension writes on startup, and reconnects when the extension restarts. Pick your
+   keyboard in the toolbar if it is not chosen automatically; the choice is kept in
+   `keyboard.txt` next to the saved comps.
+
+### Sharing the keyboard
+
+- **macOS**: CoreMIDI devices serve several programs; nothing to do.
+- **Linux**: Bitwig opens raw MIDI devices exclusively, and once the companion reads the keyboard
+  through the ALSA sequencer, the kernel holds the keyboard's raw device and Bitwig reports it as
+  busy. Give Bitwig a duplicate instead: a virtual raw MIDI device fed from the keyboard's
+  sequencer port, selected as the keyboard in Bitwig's controller settings:
+
+  ```sh
+  sudo modprobe snd-virmidi midi_devs=1
+  aconnect -l                                  # find the keyboard and "Virtual Raw MIDI" clients
+  aconnect 'USB Axiom 61:0' 'Virtual Raw MIDI 2-0:0'
+  ```
+
+  The companion skips virtual ports when choosing a keyboard, so it reads the hardware port.
+- **Windows**: classic MIDI drivers allow one program per device. Use a driver with
+  multi-client support (Windows MIDI Services) or route the keyboard through a loopback port
+  for Bitwig.
 
 ### Companion options
 

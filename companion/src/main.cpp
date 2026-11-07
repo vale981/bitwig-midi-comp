@@ -1,6 +1,7 @@
 #include "api_client.hpp"
 #include "comp_store.hpp"
 #include "comp_view.hpp"
+#include "midi_input.hpp"
 #include "palette.hpp"
 #include "theme.hpp"
 
@@ -218,6 +219,14 @@ int main(int argc, char** argv) {
     midicomp::CompView view;
     midicomp::CompStore store(options->storeDir);
     view.setStore(&store);
+    // Without --screenshot: rendered screenshots should not depend on the connected devices.
+    std::unique_ptr<midicomp::MidiInput> midi;
+    if (!options->screenshot) {
+        midi = std::make_unique<midicomp::MidiInput>(
+            midicomp::CompStore::defaultDir().parent_path() / "keyboard.txt",
+            [] { glfwPostEmptyEvent(); });
+        view.setMidi(midi.get());
+    }
     ThemeWatcher watcher(options->themeDir);
     applyTheme(watcher, view, scale);
 
@@ -273,6 +282,10 @@ int main(int argc, char** argv) {
             glfwSwapBuffers(window);
         }
     }
+
+    // Its driver thread wakes GLFW; close it first.
+    view.setMidi(nullptr);
+    midi.reset();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

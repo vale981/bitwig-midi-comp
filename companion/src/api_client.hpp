@@ -105,6 +105,16 @@ class ApiClient {
     void send(std::string op, std::vector<Param> params = {}, std::string body = {});
 
     /**
+     * Queues ``POST /api/v1/<op>`` without reporting it: the reply is ignored and neither
+     * :meth:`busy` nor :meth:`lastReply` change. For data the UI does not wait on.
+     *
+     * Args:
+     *     op: command name.
+     *     body: request body.
+     */
+    void post(std::string op, std::string body);
+
+    /**
      * Queues ``GET /api/v1/<op>`` for a command that returns a document, such as ``export``.
      *
      * Args:
@@ -121,6 +131,7 @@ class ApiClient {
         std::string body;
         /** Set for :meth:`fetch`: the request is a GET and the body goes here. */
         std::function<void(std::optional<std::string>)> onDocument;
+        bool silent = false;  ///< Set for :meth:`post`.
     };
 
     void pollLoop();

@@ -14,8 +14,6 @@ import com.bitwig.extension.controller.ControllerExtensionDefinition;
 import com.bitwig.extension.controller.api.ControllerHost;
 import com.bitwig.extension.controller.api.CursorTrack;
 import com.bitwig.extension.controller.api.PinnableCursorClip;
-import com.bitwig.extension.controller.api.MidiIn;
-import com.bitwig.extension.controller.api.NoteInput;
 import com.bitwig.extension.controller.api.SettableStringValue;
 import com.bitwig.extension.controller.api.Setting;
 import com.bitwig.extension.controller.api.StringValue;
@@ -49,6 +47,8 @@ public class MidiCompExtension extends ControllerExtension
    private static final double FINEST_STEP = 1.0 / 4096;
    /** Played notes and recorded notes further apart than this are not matched. */
    private static final double MATCH_SECONDS = 0.08;
+   /** Keyboard messages are kept this long beyond the recording, for notes ending late. */
+   private static final long RECORDING_MARGIN_NANOS = 200_000_000L;
 
    /** Outcome of a command. */
    private record Result(boolean ok, String message)
@@ -122,15 +122,15 @@ public class MidiCompExtension extends ControllerExtension
    /** A session waiting for its clip to be re-read at a new grid resolution. */
    private String pendingStart;
    private long pendingStartAt;
-   /** Notes played on the MIDI input during the current recording. */
-   private final List<PassSorter.Played> played = new ArrayList<>();
-   /** Notes the session clip's track reported during the current recording. */
-   private final List<PassSorter.Played> trackPlayed = new ArrayList<>();
-   /** Pinned to the session clip's track, whose notes time the passes without a MIDI input. */
-   private CursorTrack sessionTrack;
+   /** Keyboard notes sent by the companion, with timestamps. */
+   private final KeyboardEvents keyboard = new KeyboardEvents();
+   /** The transport position during the current recording. */
+   private final TransportTimeline timeline = new TransportTimeline();
    private int playedWraps;
+   /** When the current recording started and ended (``System.nanoTime()``), 0 if not yet. */
+   private long recordingSince;
+   private long recordingUntil;
    private double lastPosition = Double.NaN;
-   private long lastPositionAt;
    private boolean emptyCheckLogged;
 
    private final ConcurrentLinkedQueue<Command> commands = new ConcurrentLinkedQueue<>();
@@ -142,22 +142,11 @@ public class MidiCompExtension extends ControllerExtension
 
    private SettableStringValue apiStatus;
 
-   /** Whether this instance has a MIDI input for the keyboard. */
-   private final boolean keyboardInput;
-
-   /**
-    * Args:
-    *    definition: the extension definition.
-    *    host: the controller host.
-    *    keyboardInput: whether the definition declares a MIDI input for the keyboard.
-    */
    protected MidiCompExtension(
       final ControllerExtensionDefinition definition,
-      final ControllerHost host,
-      final boolean keyboardInput)
+      final ControllerHost host)
    {
       super(definition, host);
-      this.keyboardInput = keyboardInput;
    }
 
    @Override
@@ -184,23 +173,9 @@ public class MidiCompExtension extends ControllerExtension
          "not running");
       ((Setting) apiStatus).disable();
 
-      // With the keyboard-input variant, the keyboard is forwarded to tracks and its notes time
-      // loop passes (see PassSorter); otherwise the comp track's notes are used.
-      if (keyboardInput)
-      {
-         final MidiIn midiIn = host.getMidiInPort(0);
-         final NoteInput keyboard = midiIn.createNoteInput("Keyboard", "??????");
-         keyboard.setShouldConsumeEvents(false);
-         midiIn.setMidiCallback(this::onMidi);
-      }
       transport.tempo().value().markInterested();
       transport.arrangerLoopDuration().markInterested();
       transport.playPosition().addValueObserver(this::onPosition);
-
-      sessionTrack = host.createCursorTrack("midicomp-session", "Session track", 0, 0, true);
-      sessionTrack.isPinned().markInterested();
-      sessionTrack.name().markInterested();
-      observeTrackNotes(sessionTrack);
 
       startServer();
       running = true;
@@ -330,6 +305,21 @@ public class MidiCompExtension extends ControllerExtension
       Command c;
       while ((c = commands.poll()) != null)
       {
+         if (c.op().equals("played"))
+         {
+            // Frequent and silent: no status message, no state change, no write.
+            String reply = Json.reply(true, "ok");
+            try
+            {
+               receiveKeyboard(c.body());
+            }
+            catch (final RuntimeException e)
+            {
+               reply = Json.reply(false, "Bad keyboard data: " + e.getMessage());
+            }
+            c.reply().complete(reply);
+            continue;
+         }
          if (c.op().equals("export"))
          {
             // Returns the document itself rather than a result message.
@@ -697,9 +687,6 @@ public class MidiCompExtension extends ControllerExtension
          model.addTake("Original", ref.source(), lengthInSteps(selected, content), content);
       if (ref.source() == Take.Source.LAUNCHER)
          pinTargetToSelection();
-      sessionTrack.selectChannel(
-         ref.source() == Take.Source.LAUNCHER ? launcherTrack : arrangerTrack);
-      sessionTrack.isPinned().set(true);
       live.link(ref, content);
       capture.start();
       log("Comping " + ref.label() + ": " + selected.describe());
@@ -714,7 +701,6 @@ public class MidiCompExtension extends ControllerExtension
          return Result.fail("No comp session");
       live.unlink();
       capture.stop();
-      sessionTrack.isPinned().set(false);
       if (old.source() == Take.Source.LAUNCHER)
          unpinTarget();
       model.clear();
@@ -761,13 +747,7 @@ public class MidiCompExtension extends ControllerExtension
          markDirty();
          if (recording && live.link().source() == Take.Source.ARRANGER)
          {
-            if (!recordingRequested)
-            {
-               played.clear();
-               trackPlayed.clear();
-               playedWraps = 0;
-            }
-            capture.setSplitter(this::splitByPlayedNotes);
+            capture.setSplitter(this::assembleTakes);
          }
       }
 
@@ -896,10 +876,6 @@ public class MidiCompExtension extends ControllerExtension
       recordingRequested = true;
       recordingSeen = false;
       recordingRequestedAt = System.nanoTime();
-      played.clear();
-      trackPlayed.clear();
-      playedWraps = 0;
-
       if (stopAtEnd)
          capture.armSinglePass();
       log(stopAtEnd ? "Recording one pass of the loop" : "Recording until stopped");
@@ -943,114 +919,88 @@ public class MidiCompExtension extends ControllerExtension
    /** Tracks the playback position for timing played notes, counting loop wraps. */
    private void onPosition(final double position)
    {
-      if (transportRecording() && !Double.isNaN(lastPosition)
-         && position < lastPosition - LoopCapture.WRAP_BEATS)
-         playedWraps++;
+      final long now = System.nanoTime();
+      if (!transportRecording())
+      {
+         if (recordingSince != 0 && recordingUntil == 0)
+            recordingUntil = now;
+      }
+      else if (recordingSince == 0 || recordingUntil != 0)
+      {
+         // A new recording: the first moments may still show the playhead before the loop start.
+         recordingSince = now;
+         recordingUntil = 0;
+         playedWraps = 0;
+         timeline.start(now + LoopCapture.START_GUARD_MILLIS * 1_000_000L);
+      }
+      if (transportRecording())
+      {
+         final boolean settled = now - recordingSince > LoopCapture.START_GUARD_MILLIS * 1_000_000L;
+         if (settled && !Double.isNaN(lastPosition)
+            && position < lastPosition - LoopCapture.WRAP_BEATS)
+            playedWraps++;
+         timeline.add(now, position);
+      }
       lastPosition = position;
-      lastPositionAt = System.nanoTime();
-   }
-
-   /** Notes each key played on the MIDI input while recording. */
-   private void onMidi(final int status, final int data1, final int data2)
-   {
-      if ((status & 0xF0) == 0x90 && data2 > 0)
-         notePlayed(played, data1);
    }
 
    /**
-    * Watches the notes a track plays (live input and clip playback alike).
-    *
-    * The event callback is deprecated in favour of an array of playing notes, but it reports each
-    * note-on as it happens, which is what timing needs. Only the key and the moment are used;
-    * the notes of the takes always come from Bitwig's recording.
+    * Assembles one take per loop pass from Bitwig's recording and the keyboard notes the
+    * companion sent (see :class:`LoopTakes`).
     */
-   @SuppressWarnings("deprecation")
-   private void observeTrackNotes(final CursorTrack track)
+   private List<List<NoteData>> assembleTakes(final List<NoteData> recorded)
    {
-      track.addNoteObserver((isNoteOn, key, velocity) -> {
-         if (isNoteOn && live.link() != null)
-            notePlayed(trackPlayed, key);
-      });
-   }
-
-   /**
-    * Records a note played during recording with its pass and position in the loop.
-    *
-    * Args:
-    *    into: list to add to.
-    *    key: MIDI key.
-    */
-   private void notePlayed(final List<PassSorter.Played> into, final int key)
-   {
-      if (!transportRecording() || Double.isNaN(lastPosition))
-         return;
       final double tempo = transport.tempo().value().getRaw();
-      final double loopLength = transport.arrangerLoopDuration().get();
-      final double position =
-         lastPosition + (System.nanoTime() - lastPositionAt) / 1e9 * tempo / 60.0;
-      double inLoop = position - transport.arrangerLoopStart().get();
-      int pass = playedWraps;
-      if (inLoop < 0 || loopLength <= 0)
-         return; // Pre-roll; nothing is recorded yet.
-      // Past the loop end before the jump back was reported: already the next pass.
-      while (inLoop >= loopLength)
-      {
-         inLoop -= loopLength;
-         pass++;
-      }
-      into.add(new PassSorter.Played(key, pass, inLoop));
-   }
-
-   /** Sorts a recording's notes into passes by the notes played on the MIDI input. */
-   private List<List<NoteData>> splitByPlayedNotes(final List<NoteData> notes)
-   {
-      // Prefer the MIDI input (only what was played); else the track's notes (no setup needed).
-      final boolean fromInput = !played.isEmpty();
-      final List<PassSorter.Played> timing = List.copyOf(fromInput ? played : trackPlayed);
+      final double loopStart = transport.arrangerLoopStart().get();
       final double loopBeats = transport.arrangerLoopDuration().get();
-      if (timing.isEmpty())
+      final long until = recordingUntil != 0 ? recordingUntil : System.nanoTime();
+      final List<KeyboardEvents.PlayedNote> played = keyboard.notes(recordingSince,
+         until + RECORDING_MARGIN_NANOS, timeline, loopStart, loopBeats, tempo);
+      if (played.isEmpty())
       {
-         log("No played notes were seen (MIDI input or the track), so the recording is one take");
-         return List.of(notes);
+         log("No keyboard notes arrived from the companion (is a MIDI input selected there?), "
+            + "so the recording is one take");
+         return recorded.isEmpty() ? List.of() : List.of(recorded);
       }
-      final double tempo = transport.tempo().value().getRaw();
-      final PassSorter.Result result = PassSorter.sort(notes, timing, stepSize, loopBeats,
+
+      final LoopTakes.Result result = LoopTakes.assemble(recorded, played, stepSize, loopBeats,
          MATCH_SECONDS * tempo / 60.0);
-      log(String.format("Sorted %d notes into %d takes using %d notes from %s (%d unmatched, "
-         + "added to the last take)", notes.size(), result.passes().size(), timing.size(),
-         fromInput ? "the MIDI input" : "track " + sessionTrack.name().get(), result.unmatched()));
-      if (!fromInput)
-         log(String.format("Track notes repeating the previous pass within 10 ms (possibly "
-            + "playback): %d", repeatsOfPreviousPass(timing, 0.01 * tempo / 60.0, loopBeats)));
+      final double msPerBeat = 60_000.0 / tempo;
+      log(String.format("Assembled %d takes from %d played notes: %d recorded by Bitwig, %d "
+         + "rebuilt from the keyboard, %d recorded without a played note; timing deviation of "
+         + "played vs. recorded notes: mean %.1f ms, max %.1f ms after removing a constant "
+         + "%.1f ms (%d position samples, clock offset to the companion %.1f ms)",
+         result.passes().size(), played.size(), result.matched(), result.rebuilt(),
+         result.unmatched(), result.meanDeviationBeats() * msPerBeat,
+         result.maxDeviationBeats() * msPerBeat,
+         (result.offsetBeats() - Math.round(result.offsetBeats() * 4) / 4.0) * msPerBeat,
+         timeline.sampleCount(), keyboard.clockOffset() / 1e6));
       return result.passes();
    }
 
    /**
-    * Counts notes that repeat a note of the previous pass at nearly the same loop position, which
-    * suggests clip playback rather than playing. Diagnostics for the track note source.
+    * Stores keyboard messages sent by the companion.
+    *
+    * Args:
+    *    json: ``{"events": [[timeMicros, status, data1, data2], ...]}`` with times on the
+    *       monotonic clock in microseconds.
     */
-   private static int repeatsOfPreviousPass(
-      final List<PassSorter.Played> notes,
-      final double windowBeats,
-      final double loopBeats)
+   @SuppressWarnings("unchecked")
+   private void receiveKeyboard(final String json)
    {
-      int count = 0;
-      for (final PassSorter.Played n : notes)
+      final long arrived = System.nanoTime();
+      final Object parsed = MiniJson.parse(json);
+      if (!(parsed instanceof Map<?, ?>))
+         throw new IllegalArgumentException("Expected an object");
+      final Map<String, Object> body = (Map<String, Object>) parsed;
+      if (body.get("now") instanceof Double now)
+         keyboard.syncClock(arrived, Math.round(now * 1000.0));
+      for (final Object o : MiniJson.array(body, "events"))
       {
-         for (final PassSorter.Played m : notes)
-         {
-            if (m.pass() != n.pass() - 1 || m.key() != n.key())
-               continue;
-            double d = Math.abs(n.loopBeat() - m.loopBeat());
-            d = Math.min(d, loopBeats - d);
-            if (d <= windowBeats)
-            {
-               count++;
-               break;
-            }
-         }
+         final List<Object> e = (List<Object>) o;
+         keyboard.add(Math.round((Double) e.get(0) * 1000.0), (int) (double) (Double) e.get(1),
+            (int) (double) (Double) e.get(2), (int) (double) (Double) e.get(3));
       }
-      return count;
    }
 
    /**

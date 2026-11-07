@@ -127,6 +127,18 @@ void ApiClient::send(std::string op, std::vector<Param> params, std::string body
     notify();
 }
 
+void ApiClient::post(std::string op, std::string body) {
+    {
+        const std::scoped_lock lock(mutex_);
+        commands_.push_back(Command{.op = std::move(op),
+                                    .params = {},
+                                    .body = std::move(body),
+                                    .onDocument = {},
+                                    .silent = true});
+    }
+    wake_.notify_all();
+}
+
 void ApiClient::fetch(std::string op, std::function<void(std::optional<std::string>)> done) {
     {
         const std::scoped_lock lock(mutex_);
@@ -246,9 +258,10 @@ void ApiClient::commandLoop() {
                 return;
             command = std::move(commands_.front());
             commands_.pop_front();
-            commandInFlight_ = !command.onDocument;
+            commandInFlight_ = !command.onDocument && !command.silent;
         }
-        notify();
+        if (!command.silent)
+            notify();
 
         std::string path = "/api/v1/" + command.op;
         char separator = '?';
@@ -274,6 +287,16 @@ void ApiClient::commandLoop() {
             command.onDocument(std::move(document));
             const std::scoped_lock lock(mutex_);
             commandInFlight_ = false;
+            continue;
+        }
+
+        if (command.silent) {
+            if (endpoint) {
+                httplib::Client client(endpoint->url);
+                client.set_connection_timeout(2, 0);
+                client.set_read_timeout(10, 0);
+                client.Post(path, authHeaders(*endpoint), command.body, "application/json");
+            }
             continue;
         }
 
