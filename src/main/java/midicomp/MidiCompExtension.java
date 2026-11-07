@@ -1,0 +1,745 @@
+package midicomp;
+
+import java.io.IOException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+import com.bitwig.extension.controller.ControllerExtension;
+import com.bitwig.extension.controller.api.ControllerHost;
+import com.bitwig.extension.controller.api.CursorTrack;
+import com.bitwig.extension.controller.api.PinnableCursorClip;
+import com.bitwig.extension.controller.api.SettableBooleanValue;
+import com.bitwig.extension.controller.api.SettableEnumValue;
+import com.bitwig.extension.controller.api.SettableStringValue;
+import com.bitwig.extension.controller.api.Setting;
+import com.bitwig.extension.controller.api.Track;
+import com.bitwig.extension.controller.api.Transport;
+
+/**
+ * MIDI comping for launcher and arranger clips, driven by a companion app over HTTP.
+ *
+ * The user comps one clip at a time (a *session*). Loop passes recorded into that clip become
+ * takes, further takes can be captured from other clips, and the comp is written back into the
+ * clip as it is edited. :class:`CompServer` serves the state and accepts commands; see ``API.md``.
+ *
+ * All Bitwig API calls happen on the controller thread. Commands arrive on HTTP threads and are
+ * queued; :meth:`pump` runs them and publishes the resulting state.
+ */
+public class MidiCompExtension extends ControllerExtension
+{
+   private static final String SETTINGS_CATEGORY = "Companion app";
+
+   /** Grid width in steps. Combined with the resolution this bounds the usable clip length. */
+   private static final int GRID_WIDTH = 16384;
+   private static final int GRID_HEIGHT = 128;
+   private static final int HISTORY_DEPTH = 64;
+   private static final int PUMP_INTERVAL_MS = 25;
+   private static final int SERVER_PORT = 8765;
+   private static final int SERVER_PORT_ATTEMPTS = 10;
+
+   private static final String[] RESOLUTIONS = { "1/64 beat (64 bars)", "1/128 beat (32 bars)",
+      "1/256 beat (16 bars)" };
+   private static final double[] RESOLUTION_STEPS = { 1.0 / 64, 1.0 / 128, 1.0 / 256 };
+
+   /** Outcome of a command. */
+   private record Result(boolean ok, String message)
+   {
+      static Result ok(final String message)
+      {
+         return new Result(true, message);
+      }
+
+      static Result fail(final String message)
+      {
+         return new Result(false, message);
+      }
+   }
+
+   /**
+    * An undoable clip write.
+    *
+    * Args:
+    *    target: the cursor the write went through.
+    *    op: the write.
+    *    ref: the clip written to; undo requires the cursor to point at it again.
+    */
+   private record HistoryEntry(EditableClip target, CompOperation op, ClipRef ref)
+   {
+   }
+
+   /** An API command waiting for the controller thread. */
+   private record Command(String op, Map<String, String> params, CompletableFuture<String> reply)
+   {
+   }
+
+   private ControllerHost host;
+   private Transport transport;
+
+   /** Follows the selected launcher clip. */
+   private CursorTrack launcherTrack;
+   private PinnableCursorClip launcherCursor;
+   private EditableClip launcherSel;
+
+   /** Pinned to a linked launcher clip, so that syncing does not depend on the selection. */
+   private CursorTrack targetTrack;
+   private PinnableCursorClip targetCursor;
+   private EditableClip target;
+
+   /** Follows the selected arranger clip; the API cannot pin it. */
+   private EditableClip arranger;
+   private Track arrangerTrack;
+
+   private final CompModel model = new CompModel();
+   private final LiveSync live = new LiveSync();
+   private final LoopCapture capture = new LoopCapture();
+   private final Deque<HistoryEntry> history = new ArrayDeque<>();
+   private double stepSize = RESOLUTION_STEPS[1];
+   /** The user's overdub setting before the session enabled it, restored when the session ends. */
+   private boolean overdubBefore;
+   private long launcherRefreshVersion = Long.MIN_VALUE;
+   private long arrangerRefreshVersion = Long.MIN_VALUE;
+
+   private final ConcurrentLinkedQueue<Command> commands = new ConcurrentLinkedQueue<>();
+   private CompServer server;
+   private long stateVersion;
+   private boolean stateDirty = true;
+   private String lastMessage = "";
+   private volatile boolean running;
+
+   private SettableStringValue apiStatus;
+
+   protected MidiCompExtension(
+      final MidiCompExtensionDefinition definition,
+      final ControllerHost host)
+   {
+      super(definition, host);
+   }
+
+   @Override
+   public void init()
+   {
+      host = getHost();
+
+      transport = host.createTransport();
+      transport.timeSignature().numerator().addValueObserver(v -> markDirty());
+      transport.timeSignature().denominator().addValueObserver(v -> markDirty());
+      transport.playPosition().markInterested();
+      transport.isPlaying().addValueObserver(v -> markDirty());
+      transport.isArrangerRecordEnabled().addValueObserver(v -> markDirty());
+      transport.isArrangerOverdubEnabled().addValueObserver(v -> markDirty());
+      transport.isClipLauncherOverdubEnabled().addValueObserver(v -> markDirty());
+
+      initLauncherCursors();
+      initArrangerCursor();
+
+      apiStatus = host.getDocumentState().getStringSetting("API", SETTINGS_CATEGORY, 80,
+         "not running");
+      ((Setting) apiStatus).disable();
+
+      // Last: the resolution observer touches state created above.
+      final SettableEnumValue resolution = host.getPreferences().getEnumSetting(
+         "Timing resolution", "MIDI Comp", RESOLUTIONS, RESOLUTIONS[1]);
+      resolution.addValueObserver(this::setResolution);
+
+      startServer();
+      running = true;
+      host.scheduleTask(this::pump, PUMP_INTERVAL_MS);
+      host.println("MIDI Comp initialized");
+   }
+
+   @Override
+   public void exit()
+   {
+      running = false;
+      if (server != null)
+      {
+         EndpointFile.delete(server.token());
+         server.stop();
+      }
+      Command c;
+      while ((c = commands.poll()) != null)
+         c.reply().complete(Json.reply(false, "Extension stopped"));
+   }
+
+   @Override
+   public void flush()
+   {
+   }
+
+   // ---------------------------------------------------------------------------------------------
+   // Setup
+
+   private void initLauncherCursors()
+   {
+      launcherTrack = host.createCursorTrack("midicomp-take", "Take", 0, 0, true);
+      launcherCursor = launcherTrack.createLauncherCursorClip(
+         "midicomp-take-clip", "Take clip", GRID_WIDTH, GRID_HEIGHT);
+      targetTrack = host.createCursorTrack("midicomp-target", "Comp target", 0, 0, true);
+      targetCursor = targetTrack.createLauncherCursorClip(
+         "midicomp-target-clip", "Comp target clip", GRID_WIDTH, GRID_HEIGHT);
+
+      launcherSel = new EditableClip(launcherCursor, stepSize);
+      target = new EditableClip(targetCursor, stepSize);
+
+      // Identity changes make the mirrors untrustworthy until the new notes have arrived.
+      launcherTrack.name().addValueObserver(v -> identityChanged(launcherSel));
+      launcherTrack.position().addValueObserver(v -> identityChanged(launcherSel));
+      launcherCursor.exists().addValueObserver(v -> identityChanged(launcherSel));
+      launcherCursor.clipLauncherSlot().name().addValueObserver(v -> markDirty());
+      launcherCursor.clipLauncherSlot().sceneIndex()
+         .addValueObserver(v -> identityChanged(launcherSel));
+      launcherCursor.playingStep().markInterested();
+
+      targetTrack.name().addValueObserver(v -> identityChanged(target));
+      targetTrack.position().addValueObserver(v -> identityChanged(target));
+      targetTrack.isPinned().markInterested();
+      targetCursor.isPinned().addValueObserver(v -> identityChanged(target));
+      targetCursor.exists().addValueObserver(v -> identityChanged(target));
+      targetCursor.clipLauncherSlot().name().addValueObserver(v -> markDirty());
+      targetCursor.clipLauncherSlot().sceneIndex().addValueObserver(v -> identityChanged(target));
+      targetCursor.clipLauncherSlot().isRecording().addValueObserver(v -> markDirty());
+   }
+
+   private void initArrangerCursor()
+   {
+      arranger = new EditableClip(host.createArrangerCursorClip(GRID_WIDTH, GRID_HEIGHT), stepSize);
+      arrangerTrack = arranger.clip().getTrack();
+      arrangerTrack.name().addValueObserver(v -> identityChanged(arranger));
+      arrangerTrack.position().addValueObserver(v -> identityChanged(arranger));
+      arranger.clip().exists().addValueObserver(v -> identityChanged(arranger));
+      arranger.clip().playingStep().markInterested();
+   }
+
+   private void identityChanged(final EditableClip clip)
+   {
+      clip.touch();
+      markDirty();
+   }
+
+   private void startServer()
+   {
+      try
+      {
+         final String info = "{\"name\":\"MIDI Comp\",\"extensionVersion\":"
+            + Json.quote(getExtensionDefinition().getVersion())
+            + ",\"apiVersion\":" + CompServer.API_VERSION + "}";
+         server = CompServer.start(SERVER_PORT, SERVER_PORT_ATTEMPTS, this::enqueue, info);
+      }
+      catch (final IOException e)
+      {
+         apiStatus.set("not running");
+         host.errorln("Comp API server failed to start: " + e.getMessage());
+         return;
+      }
+
+      apiStatus.set(server.baseUrl());
+      host.println("Comp API: " + server.baseUrl() + " (endpoint file " + EndpointFile.path() + ")");
+      try
+      {
+         EndpointFile.write(server.baseUrl(), server.token());
+      }
+      catch (final IOException e)
+      {
+         host.errorln("Could not write " + EndpointFile.path() + ": " + e.getMessage());
+      }
+   }
+
+   // ---------------------------------------------------------------------------------------------
+   // Command plumbing
+
+   /** Called on an HTTP thread. */
+   private CompletableFuture<String> enqueue(final String op, final Map<String, String> params)
+   {
+      final CompletableFuture<String> reply = new CompletableFuture<>();
+      if (!running)
+         reply.complete(Json.reply(false, "Extension stopped"));
+      else
+         commands.add(new Command(op, params, reply));
+      return reply;
+   }
+
+   private void pump()
+   {
+      if (!running)
+         return;
+
+      Command c;
+      while ((c = commands.poll()) != null)
+      {
+         Result result;
+         try
+         {
+            result = runCommand(c.op(), c.params());
+         }
+         catch (final RuntimeException e)
+         {
+            host.errorln("Comp API command " + c.op() + " failed: " + e);
+            result = Result.fail("Command failed: " + e.getMessage());
+         }
+         lastMessage = result.message();
+         markDirty();
+         live.markDirty();
+         c.reply().complete(Json.reply(result.ok(), result.message()));
+      }
+
+      refreshTake(launcherSel, Take.Source.LAUNCHER);
+      refreshTake(arranger, Take.Source.ARRANGER);
+      tickSession();
+
+      if (stateDirty && server != null)
+      {
+         stateDirty = false;
+         stateVersion++;
+         server.publish(buildState(), stateVersion);
+      }
+      host.scheduleTask(this::pump, PUMP_INTERVAL_MS);
+   }
+
+   private String buildState()
+   {
+      final ClipRef launcher = launcherRef();
+      final ClipRef arrangerClip = arrangerRef();
+      final StateJson.Selection selection = new StateJson.Selection(
+         launcher == null ? null : launcher.label(),
+         arrangerClip == null ? null : arrangerClip.label());
+
+      StateJson.SessionStatus session = null;
+      if (live.link() != null)
+         session = new StateJson.SessionStatus(live.link(), sessionAvailable(), isRecording(),
+            overdubSetting(live.link().source()).get(), live.isPending(),
+            clipSteps(sessionClip()) < model.length(), capture.passes());
+
+      return StateJson.build(stateVersion, model, stepSize, barSteps(), selection, session,
+         !history.isEmpty(), lastMessage);
+   }
+
+   private void markDirty()
+   {
+      stateDirty = true;
+   }
+
+   private Result runCommand(final String op, final Map<String, String> p)
+   {
+      return switch (op)
+      {
+         case "addTake" -> addTake(p.get("source"));
+         case "removeTake" -> model.removeTake(intParam(p, "take"))
+            ? Result.ok("Take removed") : Result.fail("No such take");
+         case "assign" -> assign(intParam(p, "from"), intParam(p, "to"), intParam(p, "take"));
+         case "clear" -> assign(intParam(p, "from"), intParam(p, "to"), -1);
+         case "useTake" -> assign(0, model.length(), intParam(p, "take"));
+         case "undoEdit" -> model.undo() ? Result.ok("Edit undone") : Result.fail("Nothing to undo");
+         case "start" -> startSession(p.getOrDefault("source", ""));
+         case "end" -> endSession();
+         case "revert" -> undoLastWrite();
+         default -> Result.fail("Unknown command: " + op);
+      };
+   }
+
+   private static int intParam(final Map<String, String> p, final String name)
+   {
+      final String value = p.get(name);
+      if (value == null)
+         throw new IllegalArgumentException("Missing parameter " + name);
+      return Integer.parseInt(value);
+   }
+
+   /** Returns the selection cursor for ``"launcher"`` or ``"arranger"``, or ``null``. */
+   private EditableClip selectionCursor(final String name)
+   {
+      return switch (name)
+      {
+         case "launcher" -> launcherSel;
+         case "arranger" -> arranger;
+         default -> null;
+      };
+   }
+
+   private String selectHint(final EditableClip clip, final String what)
+   {
+      return "Select " + what + " in the " + (clip == arranger ? "arranger" : "clip launcher");
+   }
+
+   // ---------------------------------------------------------------------------------------------
+   // Takes and segments
+
+   private Result addTake(final String source)
+   {
+      final EditableClip clip = selectionCursor(source == null ? "" : source);
+      if (clip == null)
+         return Result.fail("Unknown source: " + source);
+      final ClipRef ref = refOf(clip);
+      if (ref == null)
+         return Result.fail(selectHint(clip, "a MIDI clip"));
+      if (ref.sameClip(live.link()))
+         return Result.fail("This is the clip being comped; record into it to add takes");
+      if (takeAt(ref) != null)
+         return Result.fail(ref.label() + " is already a take");
+      if (!clip.isSettled(LiveSync.SETTLE_MILLIS))
+         return Result.fail("Bitwig is still sending the clip's notes; try again");
+
+      final List<NoteData> notes = clip.notes().all();
+      final Take take = model.addTake(ref.label(), ref.source(), ref, lengthInSteps(clip, notes),
+         notes);
+      return Result.ok(
+         String.format("Added take %d: %s (%d notes)", take.id(), ref.label(), notes.size()));
+   }
+
+   private Result assign(final int from, final int to, final int takeId)
+   {
+      if (takeId >= 0 && model.take(takeId) == null)
+         return Result.fail("No such take");
+      final int clampedFrom = Math.max(0, from);
+      final int clampedTo = Math.min(model.length(), to);
+      if (clampedTo <= clampedFrom)
+         return Result.fail("Empty range");
+      model.assign(clampedFrom, clampedTo, takeId);
+      return Result.ok(String.format("%s %s to %s", takeId < 0 ? "Cleared" : "Take " + takeId + ":",
+         formatPosition(clampedFrom * stepSize), formatPosition(clampedTo * stepSize)));
+   }
+
+   /**
+    * Updates the take shown by ``clip`` from Bitwig once its notes have settled.
+    *
+    * Arranger takes are identified by track, so each arranger take needs its own track.
+    */
+   private void refreshTake(final EditableClip clip, final Take.Source source)
+   {
+      final boolean launcher = source == Take.Source.LAUNCHER;
+      final long seen = launcher ? launcherRefreshVersion : arrangerRefreshVersion;
+      if (clip.version() == seen || !clip.exists() || !clip.isSettled(LiveSync.SETTLE_MILLIS))
+         return;
+      if (launcher)
+         launcherRefreshVersion = clip.version();
+      else
+         arrangerRefreshVersion = clip.version();
+
+      final Take take = takeAt(refOf(clip));
+      if (take == null)
+         return;
+
+      final List<NoteData> notes = clip.notes().all();
+      if (model.updateTake(take.id(), lengthInSteps(clip, notes), notes))
+      {
+         live.markDirty();
+         markDirty();
+      }
+   }
+
+   private Take takeAt(final ClipRef ref)
+   {
+      for (final Take t : model.takes())
+         if (t.origin() != null && t.origin().sameClip(ref))
+            return t;
+      return null;
+   }
+
+   // ---------------------------------------------------------------------------------------------
+   // Writing
+
+   private int lengthInSteps(final EditableClip clip, final List<NoteData> notes)
+   {
+      double beats = clip.clip().getPlayStop().get();
+      for (final NoteData n : notes)
+         beats = Math.max(beats, n.x() * stepSize + n.duration());
+      final int steps = (int) Math.ceil(beats / stepSize - 1e-9);
+      return Math.min(GRID_WIDTH, Math.max(steps, barSteps()));
+   }
+
+   /** Returns the clip's length in steps, limited to the grid. */
+   private int clipSteps(final EditableClip clip)
+   {
+      final double beats = clip.clip().getPlayStop().get();
+      return Math.min(GRID_WIDTH, Math.max(0, (int) Math.ceil(beats / stepSize - 1e-9)));
+   }
+
+   /**
+    * Returns how many steps of the comp may be written into ``clip``: never past the clip's end,
+    * since notes written there can create clips on other tracks in the arranger.
+    */
+   private int writableLength(final EditableClip clip)
+   {
+      return Math.min(model.length(), clipSteps(clip));
+   }
+
+   private String truncationNote(final EditableClip clip)
+   {
+      if (clipSteps(clip) >= model.length())
+         return "";
+      return String.format(". The clip ends at %s, before the comp (%s); notes after its end are "
+         + "not written", formatPosition(clipSteps(clip) * stepSize),
+         formatPosition(model.length() * stepSize));
+   }
+
+   private List<NoteData> renderedComp(final int length)
+   {
+      final List<NoteData> notes = new ArrayList<>();
+      for (final CompModel.CompNote n : model.render(stepSize))
+         if (n.note().x() < length)
+            notes.add(n.note());
+      return notes;
+   }
+
+   private Result undoLastWrite()
+   {
+      final HistoryEntry entry = history.peekFirst();
+      if (entry == null)
+         return Result.fail("Nothing to revert");
+
+      // Cursors follow the selection; the written clip must be under the cursor again.
+      if (!entry.ref().sameClip(refOf(entry.target())))
+         return Result.fail("Select " + entry.ref().label() + " to revert the last write");
+
+      history.removeFirst();
+      entry.target().revert(entry.op());
+      // The clip holds its original content again, so the session is over.
+      if (entry.ref().sameClip(live.link()))
+         endSession();
+      markDirty();
+      return Result.ok("Restored " + entry.ref().label() + " and finished comping");
+   }
+
+   private void pushHistory(final HistoryEntry entry)
+   {
+      history.addFirst(entry);
+      while (history.size() > HISTORY_DEPTH)
+         history.removeLast();
+      markDirty();
+   }
+
+   // ---------------------------------------------------------------------------------------------
+   // Clip identity
+
+   private ClipRef launcherRef()
+   {
+      if (!launcherSel.exists())
+         return null;
+      final String track = launcherTrack.name().get();
+      return new ClipRef(Take.Source.LAUNCHER, launcherTrack.position().get(), track,
+         launcherCursor.clipLauncherSlot().sceneIndex().get(),
+         track + " / " + launcherCursor.clipLauncherSlot().name().get());
+   }
+
+   private ClipRef targetRef()
+   {
+      if (!targetCursor.isPinned().get() || !target.exists())
+         return null;
+      final String track = targetTrack.name().get();
+      return new ClipRef(Take.Source.LAUNCHER, targetTrack.position().get(), track,
+         targetCursor.clipLauncherSlot().sceneIndex().get(),
+         track + " / " + targetCursor.clipLauncherSlot().name().get());
+   }
+
+   private ClipRef arrangerRef()
+   {
+      if (!arranger.exists())
+         return null;
+      final String track = arrangerTrack.name().get();
+      return new ClipRef(Take.Source.ARRANGER, arrangerTrack.position().get(), track, -1,
+         track + " (arranger)");
+   }
+
+   /** Returns what ``clip``'s cursor currently points at, or ``null`` if nothing. */
+   private ClipRef refOf(final EditableClip clip)
+   {
+      if (clip == launcherSel)
+         return launcherRef();
+      if (clip == target)
+         return targetRef();
+      return arrangerRef();
+   }
+
+   // ---------------------------------------------------------------------------------------------
+   // Comp session
+
+   private Result startSession(final String source)
+   {
+      final EditableClip selected = selectionCursor(source);
+      if (selected == null)
+         return Result.fail("Unknown source: " + source);
+      final ClipRef ref = refOf(selected);
+      if (ref == null)
+         return Result.fail(selectHint(selected, "the clip to comp"));
+      if (ref.sameClip(live.link()))
+         return Result.fail("Already comping " + ref.label());
+      if (!selected.isSettled(LiveSync.SETTLE_MILLIS))
+         return Result.fail("Bitwig is still sending the clip's notes; try again");
+
+      if (live.link() != null)
+         endSession();
+      model.clear();
+      history.clear();
+
+      // What the clip holds now becomes the first take, and the content the sync expects.
+      final List<NoteData> content = selected.notes().all();
+      if (!content.isEmpty())
+         model.addTake("Original", ref.source(), null, lengthInSteps(selected, content), content);
+      if (ref.source() == Take.Source.LAUNCHER)
+         pinTargetToSelection();
+      // Without overdub, Bitwig records into a new clip on top of the comp clip.
+      overdubBefore = overdubSetting(ref.source()).get();
+      overdubSetting(ref.source()).set(true);
+      live.link(ref, content);
+      capture.start();
+      return Result.ok("Comping " + ref.label() + ". Record into it with the loop on; each pass "
+         + "becomes a take.");
+   }
+
+   private Result endSession()
+   {
+      final ClipRef old = live.link();
+      if (old == null)
+         return Result.fail("No comp session");
+      live.unlink();
+      capture.stop();
+      overdubSetting(old.source()).set(overdubBefore);
+      if (old.source() == Take.Source.LAUNCHER)
+         unpinTarget();
+      model.clear();
+      history.clear();
+      return Result.ok("Finished comping " + old.label());
+   }
+
+   private SettableBooleanValue overdubSetting(final Take.Source source)
+   {
+      return source == Take.Source.LAUNCHER
+         ? transport.isClipLauncherOverdubEnabled()
+         : transport.isArrangerOverdubEnabled();
+   }
+
+   /** Returns the cursor that shows the session clip. */
+   private EditableClip sessionClip()
+   {
+      return live.link().source() == Take.Source.LAUNCHER ? target : arranger;
+   }
+
+   /** Returns whether the session clip is under its cursor right now. */
+   private boolean sessionAvailable()
+   {
+      return live.link().sameClip(refOf(sessionClip()));
+   }
+
+   /** Returns whether Bitwig is recording into the session clip. */
+   private boolean isRecording()
+   {
+      if (live.link().source() == Take.Source.LAUNCHER)
+         return sessionAvailable() && targetCursor.clipLauncherSlot().isRecording().get();
+      return transport.isPlaying().get() && transport.isArrangerRecordEnabled().get();
+   }
+
+   /**
+    * Collects recorded loop passes, then keeps the session clip in sync with the comp.
+    *
+    * While Bitwig records into the clip (and until the last pass is collected) nothing is written;
+    * afterwards the comp is written over the recording, whose passes have become takes.
+    */
+   private void tickSession()
+   {
+      if (live.link() == null)
+         return;
+      final EditableClip clip = sessionClip();
+      final boolean available = sessionAvailable();
+      final boolean recording = isRecording();
+      final int margin = Math.max(1, (int) Math.round(0.125 / stepSize));
+
+      final List<NoteData> pass = capture.tick(clip, available, recording, live.expected(),
+         transport.playPosition().get(), clip.clip().playingStep().get(), margin,
+         System.nanoTime());
+      if (pass != null)
+         addPass(clip, pass);
+
+      if (recording || capture.isPending())
+      {
+         live.holdForRecording();
+         return;
+      }
+
+      final int length = writableLength(clip);
+      final LiveSync.Tick tick = live.tick(clip, available, () -> renderedComp(length), length);
+      if (tick.firstWrite() != null)
+         pushHistory(new HistoryEntry(clip, tick.firstWrite(), live.link()));
+      if (tick.wrote())
+         markDirty();
+   }
+
+   /**
+    * Adds a recorded pass as a take. While the comp is still a single take, the new pass replaces
+    * it, as with Bitwig's audio takes; once takes have been cut together, passes only add lanes.
+    */
+   private void addPass(final EditableClip clip, final List<NoteData> pass)
+   {
+      final boolean untouched = model.segments().size() <= 1;
+      final Take take = model.addTake("Pass " + capture.passes(), live.link().source(), null,
+         lengthInSteps(clip, clip.notes().all()), pass);
+      if (untouched)
+         model.assign(0, model.length(), take.id());
+      live.markDirty();
+      lastMessage = String.format("Recorded pass %d as take %d (%d notes)", capture.passes(),
+         take.id(), pass.size());
+      markDirty();
+   }
+
+   private void pinTargetToSelection()
+   {
+      targetTrack.selectChannel(launcherTrack);
+      targetCursor.selectClip(launcherCursor);
+      targetTrack.isPinned().set(true);
+      targetCursor.isPinned().set(true);
+      target.touch();
+   }
+
+   private void unpinTarget()
+   {
+      targetCursor.isPinned().set(false);
+      targetTrack.isPinned().set(false);
+      markDirty();
+   }
+
+   // ---------------------------------------------------------------------------------------------
+   // Preferences and formatting
+
+   private void setResolution(final String label)
+   {
+      final int index = List.of(RESOLUTIONS).indexOf(label);
+      final double newStepSize = RESOLUTION_STEPS[index < 0 ? 1 : index];
+      if (newStepSize == stepSize)
+         return;
+
+      // Grid coordinates change meaning; the host re-reports all notes for the new grid.
+      stepSize = newStepSize;
+      if (live.link() != null)
+         endSession();
+      history.clear();
+      model.clear();
+      lastMessage = "Timing resolution changed; the comp session was ended";
+      markDirty();
+      for (final EditableClip clip : List.of(launcherSel, target, arranger))
+         clip.setStepSize(stepSize);
+   }
+
+   private double barBeats()
+   {
+      return 4.0 * transport.timeSignature().numerator().get()
+         / transport.timeSignature().denominator().get();
+   }
+
+   private int barSteps()
+   {
+      return Math.max(1, (int) Math.round(barBeats() / stepSize));
+   }
+
+   /** Formats a beat time as ``bar.beat`` (1-based, quarter-note beats). */
+   private String formatPosition(final double beats)
+   {
+      final double bar = barBeats();
+      final int barIndex = (int) Math.floor(beats / bar);
+      final double beatInBar = beats - barIndex * bar;
+      final String beat = String.format("%.3f", beatInBar + 1).replaceAll("\\.?0+$", "");
+      return (barIndex + 1) + "." + beat;
+   }
+}

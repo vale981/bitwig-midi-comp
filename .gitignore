@@ -1,0 +1,7 @@
+target/
+.direnv/
+result
+result-*
+companion/build/
+companion/compile_commands.json
+.cache/

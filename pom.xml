@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>midicomp</groupId>
+  <artifactId>MidiComp</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <name>MIDI Comp</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>17</maven.compiler.release>
+  </properties>
+
+  <repositories>
+    <repository>
+      <id>bitwig</id>
+      <name>Bitwig Maven Repository</name>
+      <url>https://maven.bitwig.com</url>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.bitwig</groupId>
+      <artifactId>extension-api</artifactId>
+      <version>25</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.4</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <compilerArgs>
+            <arg>-Xlint:all</arg>
+            <arg>-Werror</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+      </plugin>
+      <plugin>
+        <!-- Bitwig loads extensions from *.bwextension files, which are plain jars. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>rename-to-bwextension</id>
+            <phase>package</phase>
+            <goals><goal>run</goal></goals>
+            <configuration>
+              <target>
+                <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                      tofile="${project.build.directory}/MidiComp.bwextension"/>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

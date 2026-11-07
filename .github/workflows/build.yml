@@ -1,0 +1,95 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extension:
+    name: Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Build and test
+        run: mvn -B package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MidiComp-extension
+          path: target/MidiComp.bwextension
+          if-no-files-found: error
+
+  companion:
+    name: Companion (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libgl1-mesa-dev
+      - name: Configure
+        run: cmake -S companion -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Install
+        run: cmake --install build --config Release --prefix dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: midicomp-companion-${{ matrix.name }}
+          path: dist/bin/
+          if-no-files-found: error
+
+  nix:
+    name: Nix flake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+      - name: Build companion package
+        run: nix build .#companion -L
+      - name: Check flake
+        run: nix flake check -L
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [extension, companion]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Package
+        run: |
+          mkdir release
+          cp artifacts/MidiComp-extension/MidiComp.bwextension release/
+          for platform in Linux macOS Windows; do
+            (cd "artifacts/midicomp-companion-$platform" && zip -r "../../release/midicomp-companion-$platform.zip" .)
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
