@@ -100,19 +100,74 @@ Download the extension and the companion for your platform from the
 - **macOS**: CoreMIDI devices serve several programs; nothing to do.
 - **Linux**: Bitwig opens raw MIDI devices exclusively, and once the companion reads the keyboard
   through the ALSA sequencer, the kernel holds the keyboard's raw device and Bitwig reports it as
-  busy. Give Bitwig a duplicate instead: a virtual raw MIDI device fed from the keyboard's
-  sequencer port, selected as the keyboard in Bitwig's controller settings:
-
-  ```sh
-  sudo modprobe snd-virmidi midi_devs=1
-  aconnect -l                                  # find the keyboard and "Virtual Raw MIDI" clients
-  aconnect 'USB Axiom 61:0' 'Virtual Raw MIDI 2-0:0'
-  ```
-
-  The companion skips virtual ports when choosing a keyboard, so it reads the hardware port.
+  busy. The fix is a copy of each device on a virtual raw MIDI device (`snd-virmidi`): Bitwig
+  uses the copy, the companion reads the device itself. See [MIDI copies on
+  Linux](#midi-copies-on-linux).
 - **Windows**: classic MIDI drivers allow one program per device. Use a driver with
   multi-client support (Windows MIDI Services) or route the keyboard through a loopback port
   for Bitwig.
+
+### MIDI copies on Linux
+
+[`tools/midi_copies.py`](tools/midi_copies.py) gives every MIDI device a copy on a virtual raw
+MIDI port: it connects each readable port of each device to its own virtual port, and the
+virtual port back to the device, so messages from Bitwig (such as LEDs on a controller) reach
+the hardware. Devices plugged in later are picked up within two seconds. Each device port keeps
+its copy across replugging and reboots; when all copies are taken, the copy of the device seen
+least recently is reused.
+
+In Bitwig, select the copies ("VirMIDI 16-0", ...) instead of the devices, in the controller
+settings for each controller that uses them. In the companion, select the device itself (the
+automatic choice skips the copies). Reading a copy does not show the device's notes: what
+arrives at a copy goes out on its raw device, which Bitwig has open.
+
+The copies cannot be renamed: the kernel names them after their card and device number. A
+fixed card number keeps the names the same, and `midi-copies list` shows which copy belongs to
+which device:
+
+```
+$ midi-copies list
+VirMIDI 16-0     <- USB Axiom 61:USB Axiom 61 MIDI 1 (and back)
+VirMIDI 16-1     <- USB Axiom 61:USB Axiom 61 MIDI 2
+VirMIDI 16-2     <- Launchpad X:Launchpad X LPX MIDI In (and back)
+VirMIDI 16-3     <- (free)
+```
+
+**NixOS.** The flake provides a module:
+
+```nix
+{
+  imports = [ midi-comp.nixosModules.midi-copies ];
+  services.midi-copies.enable = true;
+  # services.midi-copies.copies = 8;            # virtual ports (default 4, at most 16)
+  # services.midi-copies.firstCard = 16;        # card number of the copies
+  # services.midi-copies.exclude = [ "Midi Through" ];
+}
+```
+
+The kernel module options take effect after a reboot (or after reloading `snd-virmidi` while no
+program uses it).
+
+**Other distributions.** Load the kernel module with a fixed card number and run the script
+(Python 3 and `aconnect` from alsa-utils; the user needs access to `/dev/snd/seq`, usually the
+`audio` group):
+
+```sh
+echo 'options snd-virmidi index=16 midi_devs=4' | sudo tee /etc/modprobe.d/virmidi.conf
+echo snd-virmidi | sudo tee /etc/modules-load.d/virmidi.conf
+sudo modprobe snd-virmidi
+python3 tools/midi_copies.py run          # keep it running, e.g. as a systemd user service
+```
+
+**Checking the copies.**
+
+- `aconnect -l` lists the sequencer connections: the device's port shows `Connecting To` the
+  copy's client, and the copy shows `Connected From` the device.
+- `amidi -l` lists the raw devices; `amidi -p hw:16,0 -d` prints what arrives at the first copy
+  while you play (close Bitwig first, it holds the device). With running status the status byte
+  is sent once, so following notes show two bytes, e.g. `37 34` and `37 00` for note on and off.
+- `aseqdump -p 'USB Axiom 61:0'` prints what the device itself sends, also while Bitwig runs.
+- `journalctl -u midi-copies` (NixOS) shows the assignments as devices appear.
 
 ### Companion options
 

@@ -294,4 +294,32 @@ class LoopRecordingTest
       assertNear(CLIP_OFFSET + LOOP - beforeWrap, moved, 1.0);
       assertTrue(result.passes().get(1).stream().noneMatch(n -> n.key() == 72));
    }
+
+   @Test
+   void notesAfterTheLastPassAreLeftOut()
+   {
+      // Single pass: recording stopped shortly after the wrap, and Bitwig recorded the note
+      // played just after it at the loop start.
+      final Random random = new Random(11);
+      final List<KeyboardEvents.PlayedNote> played = new ArrayList<>();
+      final List<NoteData> kept = new ArrayList<>();
+      for (final Truth t : performance(random))
+      {
+         if (t.pass() > 0)
+            continue;
+         played.add(seen(t, random));
+         kept.add(recorded(t));
+      }
+      final Truth late = new Truth(1, 72, 0.1, 0.7);
+      played.add(seen(late, random));
+      kept.add(recorded(late));
+
+      final LoopTakes.Result result =
+         LoopTakes.assemble(kept, played, STEP, LOOP, 0.08 * TEMPO / 60, 0);
+      assertEquals(1, result.passes().size());
+      assertEquals(8, result.passes().get(0).size());
+      assertTrue(result.passes().get(0).stream().noneMatch(n -> n.key() == 72));
+      assertEquals(1, result.dropped());
+      assertEquals(0, result.rebuilt());
+   }
 }

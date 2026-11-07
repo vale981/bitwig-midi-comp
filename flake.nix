@@ -23,6 +23,8 @@
       };
     in
     {
+      nixosModules.midi-copies = import ./tools/midi-copies.nix;
+
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system}; in {
           companion = companionFor pkgs;

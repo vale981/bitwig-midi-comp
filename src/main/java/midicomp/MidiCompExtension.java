@@ -130,6 +130,10 @@ public class MidiCompExtension extends ControllerExtension
    /** When the current recording started and ended (``System.nanoTime()``), 0 if not yet. */
    private long recordingSince;
    private long recordingUntil;
+   /** The current recording was started to record a single pass. */
+   private boolean recordingOnePass;
+   /** A final pass shorter than this part of the loop is not a take (stopped just after a wrap). */
+   private static final double SHORTEST_FINAL_PASS = 0.25;
    private double lastPosition = Double.NaN;
    private boolean emptyCheckLogged;
 
@@ -876,6 +880,7 @@ public class MidiCompExtension extends ControllerExtension
       recordingRequested = true;
       recordingSeen = false;
       recordingRequestedAt = System.nanoTime();
+      recordingOnePass = stopAtEnd;
       if (stopAtEnd)
          capture.armSinglePass();
       log(stopAtEnd ? "Recording one pass of the loop" : "Recording until stopped");
@@ -963,8 +968,23 @@ public class MidiCompExtension extends ControllerExtension
          return recorded.isEmpty() ? List.of() : List.of(recorded);
       }
 
+      // Recording ends a moment after the stop is requested: notes played after the last
+      // intended pass are not a take (single pass: the pass after the first; otherwise a final
+      // pass that was stopped shortly after it began).
+      int lastPass = Integer.MAX_VALUE;
+      final TransportTimeline.Placement end = timeline.place(until, loopStart, loopBeats, tempo);
+      if (recordingOnePass)
+         lastPass = 0;
+      else if (end != null)
+         lastPass = end.pass() > 0 && end.loopBeat() < SHORTEST_FINAL_PASS * loopBeats
+            ? end.pass() - 1 : end.pass();
+      recordingOnePass = false;
+
       final LoopTakes.Result result = LoopTakes.assemble(recorded, played, stepSize, loopBeats,
-         MATCH_SECONDS * tempo / 60.0);
+         MATCH_SECONDS * tempo / 60.0, lastPass);
+      if (result.dropped() > 0)
+         log(String.format("Left out %d notes played after the last pass (pass %d)",
+            result.dropped(), lastPass + 1));
       final double msPerBeat = 60_000.0 / tempo;
       log(String.format("Assembled %d takes from %d played notes: %d recorded by Bitwig, %d "
          + "rebuilt from the keyboard, %d recorded without a played note; timing deviation of "

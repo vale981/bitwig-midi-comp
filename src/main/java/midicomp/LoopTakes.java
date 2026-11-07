@@ -42,13 +42,14 @@ final class LoopTakes
     *    matched: recorded notes matched to a played note.
     *    rebuilt: played notes Bitwig had overwritten, rebuilt from the keyboard data.
     *    unmatched: recorded notes without a played note; added to the last pass.
+    *    dropped: notes (recorded or played) after the last pass, left out.
     *    offsetBeats: clip-local beat of the loop start in played time.
     *    meanDeviationBeats: mean distance between matched recorded and played positions after
     *       removing the offset.
     *    maxDeviationBeats: the largest such distance.
     */
    record Result(List<List<NoteData>> passes, int matched, int rebuilt, int unmatched,
-      double offsetBeats, double meanDeviationBeats, double maxDeviationBeats)
+      int dropped, double offsetBeats, double meanDeviationBeats, double maxDeviationBeats)
    {
    }
 
@@ -76,9 +77,35 @@ final class LoopTakes
       final double loopBeats,
       final double toleranceBeats)
    {
+      return assemble(recorded, played, stepSize, loopBeats, toleranceBeats, Integer.MAX_VALUE);
+   }
+
+   /**
+    * Assembles the takes, leaving out passes after ``lastPass``: played notes in them and the
+    * recorded notes matched to those (Bitwig records into the loop start until recording stops).
+    *
+    * Args:
+    *    recorded: the notes Bitwig recorded, in grid coordinates.
+    *    played: the notes played during recording, in the order they were played.
+    *    stepSize: grid step length in beats.
+    *    loopBeats: loop length in beats.
+    *    toleranceBeats: largest position difference for a match.
+    *    lastPass: index of the last pass to keep.
+    *
+    * Returns:
+    *    The takes.
+    */
+   static Result assemble(
+      final List<NoteData> recorded,
+      final List<KeyboardEvents.PlayedNote> played,
+      final double stepSize,
+      final double loopBeats,
+      final double toleranceBeats,
+      final int lastPassToKeep)
+   {
       if (played.isEmpty() || loopBeats <= 0)
          return new Result(recorded.isEmpty() ? List.of() : List.of(List.copyOf(recorded)), 0, 0,
-            recorded.size(), 0, 0, 0);
+            recorded.size(), 0, 0, 0, 0);
 
       int lastPass = 0;
       for (final KeyboardEvents.PlayedNote p : played)
@@ -118,6 +145,7 @@ final class LoopTakes
       }
       for (final KeyboardEvents.PlayedNote p : corrected)
          lastPass = Math.max(lastPass, p.pass());
+      lastPass = Math.min(lastPass, lastPassToKeep);
 
       // 3. Final matching on corrected positions; the remaining differences are the deviation.
       final int[] partner = match(recorded, corrected, recordedByKey, playedByKey,
@@ -141,9 +169,15 @@ final class LoopTakes
       final NoteData template = recorded.isEmpty() ? null : recorded.get(0);
       final TreeMap<Integer, List<NoteData>> byPass = new TreeMap<>();
       int unmatched = 0;
+      int dropped = 0;
       for (int r = 0; r < recorded.size(); r++)
       {
          final int pass = partner[r] >= 0 ? corrected.get(partner[r]).pass() : lastPass;
+         if (pass > lastPass)
+         {
+            dropped++;
+            continue;
+         }
          if (partner[r] < 0)
             unmatched++;
          byPass.computeIfAbsent(pass, k -> new ArrayList<>()).add(recorded.get(r));
@@ -153,6 +187,11 @@ final class LoopTakes
       {
          if (used[p])
             continue;
+         if (corrected.get(p).pass() > lastPass)
+         {
+            dropped++;
+            continue;
+         }
          final NoteData note = rebuild(corrected.get(p), loopStartInClip, stepSize, template);
          if (note == null)
             continue;
@@ -160,7 +199,8 @@ final class LoopTakes
          rebuilt++;
       }
 
-      return new Result(new ArrayList<>(byPass.values()), matched, rebuilt, unmatched, offset,
+      return new Result(new ArrayList<>(byPass.values()), matched, rebuilt, unmatched, dropped,
+         offset,
          matched == 0 ? 0 : deviationSum / matched, deviationMax);
    }
 
