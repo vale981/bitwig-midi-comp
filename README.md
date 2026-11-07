@@ -190,7 +190,12 @@ python3 tools/midi_copies.py run          # keep it running, e.g. as a systemd u
 - `--store-dir DIR`: where saved comps are kept.
 - `--screenshot FILE`: render for three seconds, save the window as PPM and exit.
 - `--demo-keyboard NAME`: show `NAME` in the keyboard picker without opening MIDI (screenshots).
+- `--scale FACTOR`: UI scale on top of the display's scale, for this run (0.5 to 4).
 - `MIDICOMP_FONT=/path/to/font.ttf`: UI font. Release builds embed Roboto; the Nix build uses Inter.
+
+The UI follows the display's scale (also when the window moves to another display). *View* in
+the toolbar, or `Ctrl+=`, `Ctrl+-` and `Ctrl+0`, adjusts it further; the factor is kept in
+`ui-scale.txt` next to the saved comps.
 
 ### Theme
 
@@ -237,15 +242,15 @@ against a mock of the API:
 
 ```sh
 python3 tools/mock_api.py 18799 /tmp/mock-endpoint.json session &   # or: start, record, recording, select
-env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x760x24" \
+env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 2560x1520x24" \
   ./companion/build/midicomp-companion --endpoint /tmp/mock-endpoint.json \
-  --demo-keyboard "USB Axiom 61" --screenshot out.ppm
+  --demo-keyboard "USB Axiom 61" --scale 2 --screenshot out.ppm
 ```
 
 GLFW prefers Wayland when `WAYLAND_DISPLAY` is set, so without unsetting it the window opens on
 the desktop instead of Xvfb. Pass `--theme-dir` with an empty directory for stock colors; the
 README images use Rose Pine Dawn and, in the Theme section, the stock colors. `start.png` and
-`record.png` are cropped to 450 and 345 pixels in height.
+`record.png` are cropped to 900 and 690 pixels in height.
 
 ## Limitations
 

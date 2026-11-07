@@ -64,6 +64,19 @@ class CompView {
      */
     void setDemoKeyboard(std::string name) { demoKeyboard_ = std::move(name); }
 
+    /**
+     * Sets the user's UI scale factor shown in the View popup.
+     *
+     * Args:
+     *     scale: factor on top of the display's scale.
+     */
+    void setUiScale(const float scale) { uiScale_ = scale; }
+
+    /** Returns a UI scale factor the user chose since the last call, if any. */
+    [[nodiscard]] std::optional<float> takeUiScaleRequest() {
+        return std::exchange(uiScaleRequest_, std::nullopt);
+    }
+
     /** Returns whether an interaction is in progress and the UI should redraw continuously. */
     [[nodiscard]] bool animating() const { return drag_.has_value() || redraw_; }
 
@@ -135,6 +148,8 @@ class CompView {
     void commitRange(ApiClient& client, const State& state, int lane, int a, int b) const;
 
     void drawMidiPicker();
+    void drawViewMenu();
+    void handleScaleKeys();
     void forwardMidi(ApiClient& client, const State* state);
     void drawLog(const State& state);
     void updateStore(ApiClient& client, const State* state);
@@ -149,6 +164,8 @@ class CompView {
     // Keyboard input.
     MidiInput* midi_ = nullptr;
     std::string demoKeyboard_;
+    float uiScale_ = 1.0f;
+    std::optional<float> uiScaleRequest_;
     std::vector<std::string> midiPorts_;  ///< Listed when the picker opens.
     std::int64_t lastMidiPost_ = 0;
 

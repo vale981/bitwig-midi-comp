@@ -67,6 +67,7 @@ void CompView::draw(ApiClient& client) {
     const State* state = statePtr.get();
     updateStore(client, state);
     forwardMidi(client, state);
+    handleScaleKeys();
 
     drawToolbar(client, state);
     ImGui::Separator();
@@ -237,6 +238,8 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
     if (state != nullptr && state->session)
         ImGui::SameLine();
     drawMidiPicker();
+    ImGui::SameLine();
+    drawViewMenu();
     ImGui::SameLine();
     const float logWidth =
         ImGui::CalcTextSize("Hide log").x + 2.0f * ImGui::GetStyle().FramePadding.x;
@@ -485,6 +488,40 @@ void CompView::drawMidiPicker() {
                           error.empty() ? "" : "\n\n", error.c_str());
 }
 
+void CompView::drawViewMenu() {
+    if (ImGui::Button("View"))
+        ImGui::OpenPopup("view");
+    ImGui::SetItemTooltip("UI scale");
+    if (!ImGui::BeginPopup("view"))
+        return;
+    float percent = uiScaleRequest_.value_or(uiScale_) * 100.0f;
+    ImGui::SetNextItemWidth(160.0f * ImGui::GetFontSize() / 13.0f);
+    ImGui::SliderFloat("UI scale", &percent, 50.0f, 300.0f, "%.0f%%");
+    // Apply on release: rebuilding the fonts while dragging would move the slider.
+    if (ImGui::IsItemDeactivatedAfterEdit())
+        uiScaleRequest_ = std::clamp(percent / 100.0f, 0.5f, 3.0f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("100%"))
+        uiScaleRequest_ = 1.0f;
+    ImGui::TextDisabled("On top of the display's scale. Ctrl+= / Ctrl+- / Ctrl+0");
+    ImGui::EndPopup();
+}
+
+void CompView::handleScaleKeys() {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (!io.KeyCtrl || io.WantTextInput)
+        return;
+    const float current = uiScaleRequest_.value_or(uiScale_);
+    if (ImGui::IsKeyPressed(ImGuiKey_Equal, false) ||
+        ImGui::IsKeyPressed(ImGuiKey_KeypadAdd, false))
+        uiScaleRequest_ = std::min(3.0f, std::round(current * 11.0f) / 10.0f);
+    else if (ImGui::IsKeyPressed(ImGuiKey_Minus, false) ||
+             ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract, false))
+        uiScaleRequest_ = std::max(0.5f, std::round(current * 9.0f) / 10.0f);
+    else if (ImGui::IsKeyPressed(ImGuiKey_0, false) || ImGui::IsKeyPressed(ImGuiKey_Keypad0, false))
+        uiScaleRequest_ = 1.0f;
+}
+
 void CompView::forwardMidi(ApiClient& client, const State* state) {
     if (midi_ == nullptr)
         return;
@@ -620,10 +657,10 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
     const float pointerX = io.MousePos.x - areaPos.x;
     if (overLanes && io.KeyCtrl && io.MouseWheel != 0.0f) {
         // Ctrl+wheel zooms around the pointer.
-        const float oldPps = pxPerBar_ / static_cast<float>(state.barSteps);
+        const float oldPps = pxPerBar_ * scale / static_cast<float>(state.barSteps);
         const float anchorStep = (scrollX_ + pointerX - headerWidth) / oldPps;
         pxPerBar_ = std::clamp(pxPerBar_ * std::pow(1.15f, io.MouseWheel), 20.0f, 2000.0f);
-        const float newPps = pxPerBar_ / static_cast<float>(state.barSteps);
+        const float newPps = pxPerBar_ * scale / static_cast<float>(state.barSteps);
         applyScroll = std::max(0.0f, headerWidth + anchorStep * newPps - pointerX);
     } else if (overLanes && io.MousePos.y < areaPos.y + topHeight) {
         // The fixed part has no scrollbar of its own; forward horizontal wheel input.
@@ -634,7 +671,9 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
             applyScroll = std::max(0.0f, scrollX_ - wheelX * 3.0f * ImGui::GetFontSize());
     }
 
-    const float pps = pxPerBar_ / static_cast<float>(state.barSteps);
+    // The zoom counts unscaled pixels, so a bar takes the same space relative to the text on
+    // HiDPI displays.
+    const float pps = pxPerBar_ * scale / static_cast<float>(state.barSteps);
     const float lanesWidth = std::max(1.0f, static_cast<float>(state.length) * pps);
     const float contentWidth = headerWidth + lanesWidth + 40.0f * scale;
     const auto makeLayout = [&] {
@@ -939,7 +978,9 @@ void CompView::handleLaneInput(ApiClient& client, const State& state, const Layo
 }
 
 void CompView::handleKeys(ApiClient& client, const State& state, const Layout& layout) {
-    if (inputBlocked_ || !ImGui::IsWindowHovered() || ImGui::GetIO().WantTextInput || drag_)
+    // Ctrl with digits is the UI scale (Ctrl+0), not a take.
+    if (inputBlocked_ || !ImGui::IsWindowHovered() || ImGui::GetIO().WantTextInput || drag_ ||
+        ImGui::GetIO().KeyCtrl)
         return;
     const int step = stepAt(layout, ImGui::GetIO().MousePos.x);
     const auto cell = snapRange(step, step, gridSteps(state), state.length);

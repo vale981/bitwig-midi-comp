@@ -10,7 +10,10 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -77,6 +80,7 @@ struct Options {
     fs::path storeDir = midicomp::CompStore::defaultDir();
     std::optional<fs::path> screenshot;
     std::string demoKeyboard;
+    std::optional<float> scale;
 };
 
 void printUsage() {
@@ -89,6 +93,7 @@ void printUsage() {
         "  --store-dir DIR    where saved comps are kept\n"
         "  --screenshot FILE  render for a few seconds, save the window as PPM and exit\n"
         "  --demo-keyboard NAME  show NAME as the keyboard without opening MIDI (screenshots)\n"
+        "  --scale FACTOR     UI scale on top of the display's, instead of the saved setting\n"
         "\n"
         "Environment: MIDICOMP_FONT=path/to/font.ttf overrides the UI font.");
 }
@@ -108,6 +113,13 @@ std::optional<Options> parseArgs(const int argc, char** argv) {
             options.screenshot = argv[++i];
         } else if (arg == "--demo-keyboard" && hasValue) {
             options.demoKeyboard = argv[++i];
+        } else if (arg == "--scale" && hasValue) {
+            const float value = std::strtof(argv[++i], nullptr);
+            if (!(value >= 0.5f && value <= 4.0f)) {
+                std::fputs("--scale must be between 0.5 and 4\n", stderr);
+                return std::nullopt;
+            }
+            options.scale = value;
         } else {
             printUsage();
             return std::nullopt;
@@ -180,6 +192,61 @@ bool saveScreenshot(const fs::path& path, const int width, const int height) {
     return static_cast<bool>(out);
 }
 
+/**
+ * How large to draw the UI.
+ *
+ * ImGui works in window coordinates. On X11 and Windows these are pixels and the display's scale
+ * has to be applied by the application; on macOS and Wayland GLFW scales the framebuffer instead,
+ * and window coordinates are already logical. :meth:`ui` applies the display's scale once either
+ * way, times the user's factor.
+ */
+struct Scaling {
+    float content = 1.0f;      ///< The display's content scale.
+    float framebuffer = 1.0f;  ///< Framebuffer pixels per window coordinate.
+    float user = 1.0f;         ///< The user's factor (View > UI scale, or --scale).
+
+    /** Returns the UI scale in window coordinates. */
+    [[nodiscard]] float ui() const { return content / framebuffer * user; }
+};
+
+/** Reads the display's content scale and the framebuffer scale of ``window``. */
+void measureDisplay(GLFWwindow* window, Scaling& scaling) {
+    float x = 1.0f;
+    float y = 1.0f;
+    glfwGetWindowContentScale(window, &x, &y);
+    scaling.content = x > 0.0f ? x : 1.0f;
+    int windowWidth = 0;
+    int windowHeight = 0;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    glfwGetWindowSize(window, &windowWidth, &windowHeight);
+    glfwGetFramebufferSize(window, &pixelWidth, &pixelHeight);
+    scaling.framebuffer = windowWidth > 0 && pixelWidth > 0
+                              ? static_cast<float>(pixelWidth) / static_cast<float>(windowWidth)
+                              : 1.0f;
+}
+
+fs::path scaleSettingPath() {
+    return midicomp::CompStore::defaultDir().parent_path() / "ui-scale.txt";
+}
+
+float loadScaleSetting() {
+    std::ifstream in(scaleSettingPath());
+    float value = 1.0f;
+    if (in >> value && value >= 0.5f && value <= 4.0f)
+        return value;
+    return 1.0f;
+}
+
+void saveScaleSetting(const float value) {
+    std::error_code ec;
+    fs::create_directories(scaleSettingPath().parent_path(), ec);
+    std::ofstream(scaleSettingPath()) << value << '\n';
+}
+
+/** Set from GLFW's callback when the window moves to a display with another scale. */
+std::atomic<bool> displayScaleChanged{false};
+
 void applyTheme(const ThemeWatcher& watcher, midicomp::CompView& view, const float scale) {
     const Theme theme = Theme::load(watcher.sources());
     midicomp::applyStyle(theme, scale);
@@ -211,14 +278,17 @@ int main(int argc, char** argv) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    float scale = 1.0f;
-    float yScale = 1.0f;
-    glfwGetWindowContentScale(window, &scale, &yScale);
+    Scaling scaling;
+    measureDisplay(window, scaling);
+    scaling.user = options->scale.value_or(loadScaleSetting());
+    glfwSetWindowContentScaleCallback(window, [](GLFWwindow*, float, float) {
+        displayScaleChanged = true;
+        glfwPostEmptyEvent();
+    });
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;
-    loadFont(scale);
 
     midicomp::CompView view;
     midicomp::CompStore store(options->storeDir);
@@ -234,7 +304,39 @@ int main(int argc, char** argv) {
         view.setMidi(midi.get());
     }
     ThemeWatcher watcher(options->themeDir);
-    applyTheme(watcher, view, scale);
+
+    // Fonts are rasterized at framebuffer resolution and shown at the UI scale.
+    const auto applyScaling = [&](const bool rebuildTexture) {
+        ImGuiIO& io = ImGui::GetIO();
+        io.Fonts->Clear();
+        loadFont(scaling.ui() * scaling.framebuffer);
+        io.FontGlobalScale = 1.0f / scaling.framebuffer;
+        if (rebuildTexture) {
+            ImGui_ImplOpenGL3_DestroyFontsTexture();
+            ImGui_ImplOpenGL3_CreateFontsTexture();
+        }
+        applyTheme(watcher, view, scaling.ui());
+        view.setUiScale(scaling.user);
+    };
+    applyScaling(false);
+
+    // The default size is meant for a UI scale of 1; keep it on the screen.
+    {
+        float width = 1280.0f * scaling.ui();
+        float height = 760.0f * scaling.ui();
+        if (GLFWmonitor* monitor = glfwGetPrimaryMonitor(); monitor != nullptr) {
+            int x = 0;
+            int y = 0;
+            int areaWidth = 0;
+            int areaHeight = 0;
+            glfwGetMonitorWorkarea(monitor, &x, &y, &areaWidth, &areaHeight);
+            if (areaWidth > 0 && areaHeight > 0) {
+                width = std::min(width, static_cast<float>(areaWidth));
+                height = std::min(height, static_cast<float>(areaHeight));
+            }
+        }
+        glfwSetWindowSize(window, static_cast<int>(width), static_cast<int>(height));
+    }
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 150");
@@ -250,8 +352,18 @@ int main(int argc, char** argv) {
             else
                 glfwWaitEventsTimeout(0.25);
 
+            if (displayScaleChanged.exchange(false)) {
+                measureDisplay(window, scaling);
+                applyScaling(true);
+            }
+            if (const auto requested = view.takeUiScaleRequest()) {
+                scaling.user = *requested;
+                if (!options->scale)
+                    saveScaleSetting(scaling.user);
+                applyScaling(true);
+            }
             if (watcher.changed())
-                applyTheme(watcher, view, scale);
+                applyTheme(watcher, view, scaling.ui());
 
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
