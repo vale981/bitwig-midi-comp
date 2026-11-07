@@ -8,7 +8,7 @@ Two parts:
 - **Extension** (`MidiComp.bwextension`): a Bitwig controller extension that captures takes,
   writes the comp into the clip, and serves a local HTTP API ([API.md](API.md)).
 - **Companion app** (`midicomp-companion`): a native editor (Dear ImGui) that shows the takes and
-  the comp. It follows the colors of the Bitwig Theme Editor.
+  the comp. It follows the colors of the [Bitwig Theme Editor](https://github.com/Berikai/bitwig-theme-editor).
 
 ![Comp session, Rose Pine Dawn theme](docs/screenshots/session-rose-pine-dawn.png)
 
@@ -184,7 +184,7 @@ python3 tools/midi_copies.py run          # keep it running, e.g. as a systemd u
 
 ### Theme
 
-Colors come from the Bitwig Theme Editor: `bte_config.txt` selects the global `theme.bte` or the
+Colors come from the [Bitwig Theme Editor](https://github.com/Berikai/bitwig-theme-editor): `bte_config.txt` selects the global `theme.bte` or the
 per-version theme, layered over the newest `versions/*/default.bte`. Lanes use the timeline
 background and header colors, grid lines the grid colors, drag previews the time-selection colors,
 and takes the panel color set. Missing entries fall back to Bitwig's stock dark colors. The files
