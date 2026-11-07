@@ -103,7 +103,7 @@ Bitwig did not process the command within 5 s.
 |--------------|-----------------------------|--------|
 | `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. The grid resolution is chosen for the clip; if it changes, the clip is re-read first and the reply says "Preparing". |
 | `end`        |                             | End the session; the clip keeps the comp. |
-| `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start with overdub on (restored afterwards). Each pass is removed from the clip when collected and becomes a take; the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
+| `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start. Passes become takes (sorted by the MIDI input, see below); the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
 | `stopRecording` |                          | Stop the transport and arranger recording. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
 | `addTake`    | `source=launcher\|arranger` | Copy the selected clip's notes as a new take. |

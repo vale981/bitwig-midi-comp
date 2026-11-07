@@ -21,7 +21,7 @@ Two parts:
 
 2. **Record.** Set the loop region over the clip and press *Record* in the companion (arranger
    clips; a clip on the comp track must be selected). It empties the clip, so the comp is not
-   heard, and records from the loop start with overdub on (restored afterwards). With *Stop at
+   heard, and records from the loop start; overdub is left as you set it. With *Stop at
    loop end* (default) recording stops after one pass; without it, it continues until you press
    *Stop*, and every loop pass becomes a take. When recording stops, the comp is written back.
 
@@ -30,8 +30,7 @@ Two parts:
    input, notes which pass and loop position each key was played at, and matches Bitwig's
    recorded notes (exact timing, all attributes) to them. Notes played within a few milliseconds
    of the same key in another pass may swap passes. Without the MIDI input configured, a
-   recording becomes one take. With overdub, earlier passes play back while you record later
-   ones. Overdub is left as you set it: without it Bitwig records
+   recording becomes one take. Overdub is left as you set it: without it Bitwig records
    into a new clip on top of the comp clip, which then becomes the comp clip. *Log* shows what the
    extension saw (recording, loop wraps, collected passes), which helps when a pass does not show
    up.

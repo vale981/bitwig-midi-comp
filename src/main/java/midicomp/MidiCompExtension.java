@@ -111,8 +111,6 @@ public class MidiCompExtension extends ControllerExtension
    private final Deque<HistoryEntry> history = new ArrayDeque<>();
    private double stepSize = 1.0 / 128;
    private boolean wasRecording;
-   /** The user's overdub setting while a recording started from the companion runs, else null. */
-   private Boolean overdubToRestore;
    /**
     * A recording was started from the companion: the comp clip was emptied and the sync holds
     * until the recording has ended and its passes are collected.
@@ -160,7 +158,6 @@ public class MidiCompExtension extends ControllerExtension
       transport.isPlaying().addValueObserver(v -> markDirty());
       transport.isArrangerRecordEnabled().addValueObserver(v -> markDirty());
       transport.isArrangerLoopEnabled().markInterested();
-      transport.isArrangerOverdubEnabled().markInterested();
       transport.arrangerLoopStart().markInterested();
       transport.playStartPosition().markInterested();
 
@@ -743,11 +740,6 @@ public class MidiCompExtension extends ControllerExtension
             }
             capture.setSplitter(this::splitByPlayedNotes);
          }
-         if (!recording && overdubToRestore != null)
-         {
-            transport.isArrangerOverdubEnabled().set(overdubToRestore);
-            overdubToRestore = null;
-         }
       }
 
       // A recording started from the companion begins with the clip emptied.
@@ -866,11 +858,6 @@ public class MidiCompExtension extends ControllerExtension
       played.clear();
       playedWraps = 0;
 
-      // Overdub makes Bitwig record into the comp clip itself; each collected pass is then
-      // removed again, so every pass starts empty. The setting is restored afterwards.
-      overdubToRestore = transport.isArrangerOverdubEnabled().get();
-      transport.isArrangerOverdubEnabled().set(true);
-      capture.setClearPasses(true);
       if (stopAtEnd)
          capture.armSinglePass();
       log(stopAtEnd ? "Recording one pass of the loop" : "Recording until stopped");
