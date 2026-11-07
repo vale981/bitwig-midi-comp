@@ -119,6 +119,17 @@ final class EditableClip
       return new CompOperation(removed, added);
    }
 
+   /**
+    * Deletes a note from the clip.
+    *
+    * Args:
+    *    note: the note to delete; only its cell is used.
+    */
+   void clear(final NoteData note)
+   {
+      clip.clearStep(note.channel(), note.x(), note.key());
+   }
+
    /** Returns whether no note updates arrived for ``quietMillis``. */
    boolean isSettled(final long quietMillis)
    {

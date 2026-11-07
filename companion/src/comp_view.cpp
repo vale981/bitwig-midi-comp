@@ -112,14 +112,12 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::SameLine();
 
         const Session& session = *state->session;
-        if (session.recording || session.repeating) {
+        if (session.recording) {
             if (ImGui::Button("Stop"))
                 client.send("stopRecording");
-            ImGui::SetItemTooltip(
-                "%s", session.repeating    ? "Stop recording takes (the current pass still "
-                                             "becomes a take)"
-                      : session.singlePass ? "Recording stops at the end of the loop"
-                                           : "Stop recording");
+            ImGui::SetItemTooltip("%s", session.singlePass
+                                            ? "Recording stops at the end of the loop"
+                                            : "Stop recording (the current pass becomes a take)");
         } else {
             const bool arranger = session.source == "arranger";
             ImGui::BeginDisabled(!arranger);
@@ -141,9 +139,8 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
             ImGui::SameLine();
             ImGui::Checkbox("Stop at loop end", &stopAtLoopEnd_);
             ImGui::SetItemTooltip(
-                "On: record one take and stop.\nOff: record one pass after another, "
-                "each a take, until you press Stop\n(with a short pause between "
-                "passes).");
+                "On: record one take and stop.\nOff: keep recording; every pass of "
+                "the loop becomes a take until you press Stop.");
         }
         ImGui::SameLine();
         ImGui::TextDisabled("|");

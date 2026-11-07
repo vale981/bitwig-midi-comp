@@ -230,56 +230,32 @@ class LoopCaptureTest
       assertTrue(log.isEmpty());
    }
 
-   /**
-    * Records one single pass with a note at ``x`` and lets it be collected. Recording starts from
-    * the clip's current content, as the extension passes the content written after the last pass.
-    */
-   private List<List<NoteData>> recordOnePass(final int x)
-   {
-      capture.tick(clip, true, true, clip.notes().all(), 0.0, 0, System.nanoTime());
-      record(x, 60);
-      tick(true, 15.9, 2040, System.nanoTime());
-      tick(true, 0.05, 6, System.nanoTime());
-      assertTrue(capture.takeStopRequest());
-      final long stop = System.nanoTime();
-      tick(false, 0.1, 12, stop);
-      settle();
-      return tick(false, 0.1, 12, stop + COLLECT);
-   }
-
    @Test
-   void repeatModeAsksForOnePassAfterAnother()
+   void clearedPassesLeaveTheClipAndTheSameNoteCountsAgain()
    {
-      capture.armRepeat();
-      final List<List<NoteData>> first = recordOnePass(100);
-      assertEquals(1, first.size());
-      assertTrue(capture.restartPending());
-      assertTrue(capture.takeRestartRequest());
-      assertTrue(capture.isSinglePass());
-
-      final List<List<NoteData>> second = recordOnePass(300);
-      assertEquals(1, second.size());
-      assertTrue(hasNoteAt(second.get(0), 300));
-      assertFalse(hasNoteAt(second.get(0), 100));
-      assertTrue(capture.restartPending());
-      assertEquals(2, capture.passes());
-
-      capture.cancelRepeat();
-      assertFalse(capture.restartPending());
-      assertFalse(capture.isRepeating());
-   }
-
-   @Test
-   void aManualStopEndsRepeatMode()
-   {
-      capture.armRepeat();
+      capture.setClearPasses(true);
       tick(true, 0.0, 0, System.nanoTime());
       record(100, 60);
+      tick(true, 15.9, 2040, System.nanoTime());
+      final long wrap = System.nanoTime();
+      tick(true, 0.05, 6, wrap);
+
+      final List<List<NoteData>> first = tick(true, 0.3, 40, wrap + COLLECT);
+      assertEquals(1, first.size());
+      assertTrue(hasNoteAt(first.get(0), 100));
+      fake.deliver();
+      assertTrue(fake.cells.isEmpty(), "pass 1 is removed from the clip");
+
+      // Pass 2 plays the same note again.
+      record(100, 60);
       final long stop = System.nanoTime();
-      tick(false, 5.0, 640, stop);
+      tick(false, 1.0, 120, stop);
       settle();
-      assertEquals(1, tick(false, 5.0, 640, stop + COLLECT).size());
-      assertFalse(capture.isRepeating());
-      assertFalse(capture.restartPending());
+      final List<List<NoteData>> second = tick(false, 1.0, 120, stop + COLLECT);
+      assertEquals(1, second.size());
+      assertTrue(hasNoteAt(second.get(0), 100));
+      fake.deliver();
+      assertTrue(fake.cells.isEmpty());
+      assertEquals(2, capture.passes());
    }
 }

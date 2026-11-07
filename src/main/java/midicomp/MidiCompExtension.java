@@ -108,6 +108,15 @@ public class MidiCompExtension extends ControllerExtension
    private final Deque<HistoryEntry> history = new ArrayDeque<>();
    private double stepSize = RESOLUTION_STEPS[1];
    private boolean wasRecording;
+   /** The user's overdub setting while a recording started from the companion runs, else null. */
+   private Boolean overdubToRestore;
+   /**
+    * A recording was started from the companion: the comp clip was emptied and the sync holds
+    * until the recording has ended and its passes are collected.
+    */
+   private boolean recordingRequested;
+   private long recordingRequestedAt;
+   private boolean recordingSeen;
 
    private final ConcurrentLinkedQueue<Command> commands = new ConcurrentLinkedQueue<>();
    private CompServer server;
@@ -139,6 +148,7 @@ public class MidiCompExtension extends ControllerExtension
       transport.isPlaying().addValueObserver(v -> markDirty());
       transport.isArrangerRecordEnabled().addValueObserver(v -> markDirty());
       transport.isArrangerLoopEnabled().markInterested();
+      transport.isArrangerOverdubEnabled().markInterested();
       transport.arrangerLoopStart().markInterested();
       transport.playStartPosition().markInterested();
 
@@ -331,8 +341,7 @@ public class MidiCompExtension extends ControllerExtension
             live.isPending(),
             compLongerThanClip(), sessionAvailable() ? clipSteps(sessionClip()) : -1,
             capture.passes(),
-            capture.isSinglePass(),
-            capture.isRepeating());
+            capture.isSinglePass());
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
          session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
@@ -652,15 +661,34 @@ public class MidiCompExtension extends ControllerExtension
       {
          wasRecording = recording;
          markDirty();
+         if (!recording && overdubToRestore != null)
+         {
+            transport.isArrangerOverdubEnabled().set(overdubToRestore);
+            overdubToRestore = null;
+         }
       }
 
-      for (final List<NoteData> pass : capture.tick(clip, available, recording, live.expected(),
+      // A recording started from the companion begins with the clip emptied.
+      final List<NoteData> before = recordingRequested ? List.of() : live.expected();
+      for (final List<NoteData> pass : capture.tick(clip, available, recording, before,
          transport.playPosition().get(), clip.clip().playingStep().get(), System.nanoTime()))
          addPass(clip, pass);
       if (capture.takeStopRequest())
          stopTransportRecording();
 
-      if (recording || capture.isPending())
+      if (recordingRequested)
+      {
+         if (recording)
+            recordingSeen = true;
+         else if (recordingSeen && !capture.isPending())
+            recordingRequested = false;
+         else if (!recordingSeen && System.nanoTime() - recordingRequestedAt > 10_000_000_000L)
+         {
+            recordingRequested = false;
+            log("Recording did not start; restoring the comp");
+         }
+      }
+      if (recording || capture.isPending() || recordingRequested)
       {
          live.holdForRecording();
          return;
@@ -673,14 +701,6 @@ public class MidiCompExtension extends ControllerExtension
       if (tick.wrote())
          markDirty();
 
-      // Repeat mode: record the next pass once the comp has been written over the last one, so
-      // that the next pass starts from the clip's expected content.
-      if (capture.restartPending() && !live.isPending())
-      {
-         capture.takeRestartRequest();
-         log("Recording the next pass");
-         beginRecording();
-      }
    }
 
    /**
@@ -742,15 +762,30 @@ public class MidiCompExtension extends ControllerExtension
       if (isRecording())
          return Result.fail("Already recording");
 
+      if (!sessionAvailable())
+         return Result.fail("Select a clip on the comp clip's track first");
+
+      // Record into an empty clip: only the pass being recorded is heard. The comp is written back
+      // from the takes when recording ends.
+      final EditableClip clip = sessionClip();
+      for (final NoteData n : clip.notes().all())
+         clip.clear(n);
+      recordingRequested = true;
+      recordingSeen = false;
+      recordingRequestedAt = System.nanoTime();
+
+      // Overdub makes Bitwig record into the comp clip itself; each collected pass is then
+      // removed again, so every pass starts empty. The setting is restored afterwards.
+      overdubToRestore = transport.isArrangerOverdubEnabled().get();
+      transport.isArrangerOverdubEnabled().set(true);
+      capture.setClearPasses(true);
       if (stopAtEnd)
          capture.armSinglePass();
-      else
-         capture.armRepeat();
-      log(stopAtEnd ? "Recording one pass of the loop" : "Recording passes until stopped");
+      log(stopAtEnd ? "Recording one pass of the loop" : "Recording until stopped");
       beginRecording();
       return Result.ok(stopAtEnd
          ? "Recording one pass of the loop region"
-         : "Recording one pass after another until you press Stop");
+         : "Recording; every pass of the loop becomes a take");
    }
 
    /** Plays from the arranger loop start with arranger recording enabled. */
@@ -766,10 +801,8 @@ public class MidiCompExtension extends ControllerExtension
 
    private Result stopRecording()
    {
-      final boolean repeating = capture.isRepeating();
-      capture.cancelRepeat();
       if (!transport.isPlaying().get())
-         return repeating ? Result.ok("Stopped recording takes") : Result.fail("Not recording");
+         return Result.fail("Not recording");
       stopTransportRecording();
       return Result.ok("Recording stopped");
    }

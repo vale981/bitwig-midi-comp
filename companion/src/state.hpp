@@ -44,7 +44,6 @@ struct Session {
     int clipLength = -1;      ///< Clip length in steps, ``-1`` while it is not under its cursor.
     int passes = 0;           ///< Loop passes recorded in this session.
     bool singlePass = false;  ///< Recording stops at the end of the current pass.
-    bool repeating = false;   ///< Passes are recorded one after another until stopped.
 };
 
 /** Snapshot of the extension state, see ``API.md``. */

@@ -93,7 +93,6 @@ State parseState(const std::string_view text) {
             .clipLength = it->value("clipLength", -1),
             .passes = it->at("passes").get<int>(),
             .singlePass = it->value("singlePass", false),
-            .repeating = it->value("repeating", false),
         };
     }
 

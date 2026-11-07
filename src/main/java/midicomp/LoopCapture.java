@@ -21,10 +21,13 @@ import java.util.function.Consumer;
  * half of the loop was played before the wrap and still belongs to the earlier pass. Collections
  * that cannot run (the clip is not under its cursor) are kept and run later, in order.
  *
+ * With clearing enabled (:meth:`setClearPasses`, used when the extension records with overdub),
+ * the notes of each collected pass are removed from the clip. The next pass then starts from the
+ * comp again: it does not play on top of all earlier passes, and a note in the same cell as one of
+ * an earlier pass is recognised as new.
+ *
  * In single-pass mode (:meth:`armSinglePass`) the first wrap ends the recording: the capture asks
- * for the transport to stop and, once stopped, takes everything new in the clip as one pass. In
- * repeat mode (:meth:`armRepeat`) it then asks for the next single pass to be recorded, until
- * :meth:`cancelRepeat`. This does not depend on Bitwig reporting notes while it records.
+ * for the transport to stop and, once stopped, takes everything new in the clip as one pass.
  *
  * Bitwig may add recorded notes to the clip only when recording ends, or shortly after. The
  * collection after recording therefore waits until the clip's notes have settled and, if nothing
@@ -64,6 +67,8 @@ final class LoopCapture
    private final Consumer<String> log;
    private boolean active;
    private Map<Long, NoteData> baseline = new HashMap<>();
+   /** Notes already taken while clearing, by cell, with their arrival time. */
+   private final Map<Long, Long> taken = new HashMap<>();
    private int passes;
    private boolean wasRecording;
    private double lastPosition = Double.NaN;
@@ -75,9 +80,7 @@ final class LoopCapture
    private boolean singlePass;
    private boolean stopRequested;
    private boolean ignoreStop;
-   private boolean repeat;
-   private boolean awaitingRestart;
-   private boolean restartRequested;
+   private boolean clearPasses;
 
    /**
     * Args:
@@ -105,44 +108,6 @@ final class LoopCapture
       singlePass = true;
    }
 
-   /** Records single passes one after another until :meth:`cancelRepeat`. */
-   void armRepeat()
-   {
-      singlePass = true;
-      repeat = true;
-   }
-
-   /** Ends repeat mode; the current pass, if any, still becomes a take. */
-   void cancelRepeat()
-   {
-      repeat = false;
-      singlePass = false;
-      awaitingRestart = false;
-      restartRequested = false;
-   }
-
-   /** Returns whether repeat mode is on. */
-   boolean isRepeating()
-   {
-      return repeat;
-   }
-
-   /** Returns whether the next pass is due (repeat mode), without clearing it. */
-   boolean restartPending()
-   {
-      return restartRequested;
-   }
-
-   /** Returns whether the next pass should be recorded now (repeat mode); clears it. */
-   boolean takeRestartRequest()
-   {
-      final boolean requested = restartRequested;
-      restartRequested = false;
-      if (requested)
-         singlePass = true;
-      return requested;
-   }
-
    /** Returns whether the single pass is complete and the transport should stop; clears it. */
    boolean takeStopRequest()
    {
@@ -157,6 +122,20 @@ final class LoopCapture
       return singlePass;
    }
 
+   /**
+    * Removes the notes of each collected pass from the clip, for the current recording.
+    *
+    * Only for recordings that go into the session clip itself (overdub). Reset when the last pass
+    * of the recording has been collected.
+    *
+    * Args:
+    *    clear: whether to remove collected notes.
+    */
+   void setClearPasses(final boolean clear)
+   {
+      clearPasses = clear;
+   }
+
    /** Starts watching for recordings; previous passes are forgotten. */
    void start()
    {
@@ -164,10 +143,9 @@ final class LoopCapture
       singlePass = false;
       stopRequested = false;
       ignoreStop = false;
-      repeat = false;
-      awaitingRestart = false;
-      restartRequested = false;
+      clearPasses = false;
       baseline = new HashMap<>();
+      taken.clear();
       passes = 0;
       wasRecording = false;
       lastPosition = Double.NaN;
@@ -179,7 +157,9 @@ final class LoopCapture
    void stop()
    {
       active = false;
+      clearPasses = false;
       baseline = new HashMap<>();
+      taken.clear();
       wraps.clear();
       due.clear();
    }
@@ -216,11 +196,13 @@ final class LoopCapture
          baseline = new HashMap<>();
          for (final NoteData n : content)
             baseline.put(n.cellKey(), n);
+         taken.clear();
          wraps.clear();
          recordingStart = now;
          wasRecording = true;
-         log.accept(String.format("Recording started (clip %s, %d notes before)",
-            available ? "selected" : "NOT selected", baseline.size()));
+         log.accept(String.format("Recording started (clip %s, %d notes before%s)",
+            available ? "selected" : "NOT selected", baseline.size(),
+            clearPasses ? ", passes are cleared after collecting" : ""));
       }
       else if (recording)
       {
@@ -253,10 +235,6 @@ final class LoopCapture
             : String.format("Recording stopped after %d wraps", wraps.size()))
             + String.format("; clip shows %d notes, %d new", clip.notes().all().size(),
                countNew(clip)));
-         // A manual stop ends repeat mode; a stop at the loop end continues it.
-         awaitingRestart = repeat && ignoreStop;
-         if (!ignoreStop)
-            repeat = false;
          ignoreStop = false;
          due.add(new Due(now + millis(COLLECT_DELAY_MILLIS), wraps.size(), true,
             now + millis(FINAL_WAIT_MILLIS)));
@@ -283,6 +261,8 @@ final class LoopCapture
             break;
          due.pollFirst();
          waitingLogged = false;
+         if (next.last())
+            clearPasses = false;
          if (pass.isEmpty())
          {
             log.accept(String.format("Pass %d: no new notes%s", next.pass() + 1,
@@ -293,24 +273,23 @@ final class LoopCapture
          log.accept(String.format("Pass %d: %d notes -> take", next.pass() + 1, pass.size()));
          collected.add(pass);
       }
-
-      if (awaitingRestart && !recording && due.isEmpty())
-      {
-         awaitingRestart = false;
-         if (repeat)
-            restartRequested = true;
-      }
       return collected;
    }
 
-   /** Returns how many notes in the clip are not part of the baseline. */
+   /** Returns how many notes in the clip are neither part of the baseline nor already taken. */
    private int countNew(final EditableClip clip)
    {
       int count = 0;
       for (final NoteData n : clip.notes().all())
-         if (!baseline.containsKey(n.cellKey()))
+         if (!baseline.containsKey(n.cellKey()) && !isTaken(clip.notes(), n.cellKey()))
             count++;
       return count;
+   }
+
+   private boolean isTaken(final NoteMirror mirror, final long cell)
+   {
+      final Long arrival = taken.get(cell);
+      return arrival != null && arrival == mirror.arrivedAt(cell);
    }
 
    private static long millis(final long ms)
@@ -353,7 +332,8 @@ final class LoopCapture
 
    /**
     * Collects the new notes of ``pass``. Notes of earlier passes that arrived too late for their
-    * own collection are included; with ``last`` set, so are notes assigned to later passes.
+    * own collection are included; with ``last`` set, so are notes assigned to later passes. While
+    * clearing, the collected notes are removed from the clip.
     */
    private List<NoteData> collect(final EditableClip clip, final int pass, final boolean last)
    {
@@ -368,13 +348,21 @@ final class LoopCapture
             baseline.put(cell, n);
             continue;
          }
+         if (isTaken(mirror, cell))
+            continue;
          final long arrival = mirror.arrivedAt(cell);
          final int notePass = arrival < recordingStart ? 0 : passOf(arrival, n.x());
          if (notePass > pass && !last)
             continue;
          notes.add(n);
-         baseline.put(cell, n);
+         if (clearPasses)
+            taken.put(cell, arrival);
+         else
+            baseline.put(cell, n);
       }
+      if (clearPasses)
+         for (final NoteData n : notes)
+            clip.clear(n);
       return notes;
    }
 }
