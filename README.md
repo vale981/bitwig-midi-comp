@@ -3,6 +3,8 @@
 Comping for MIDI clips in Bitwig Studio: record loop passes into a clip, then cut the passes
 together in a companion app while the clip updates live.
 
+Even though I write code for a living, this is purely vibe-coded so take it for what it is. Without LLMs I'd never have taken on this task and so far the tool seems to be quite useful. Feel free to report bugs :).
+
 Two parts:
 
 - **Extension** (`MidiComp.bwextension`): a Bitwig controller extension that captures takes,
