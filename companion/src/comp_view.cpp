@@ -112,11 +112,14 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::SameLine();
 
         const Session& session = *state->session;
-        if (session.recording) {
+        if (session.recording || session.repeating) {
             if (ImGui::Button("Stop"))
                 client.send("stopRecording");
-            ImGui::SetItemTooltip(session.singlePass ? "Recording stops at the end of the loop"
-                                                     : "Stop recording");
+            ImGui::SetItemTooltip(
+                "%s", session.repeating    ? "Stop recording takes (the current pass still "
+                                             "becomes a take)"
+                      : session.singlePass ? "Recording stops at the end of the loop"
+                                           : "Stop recording");
         } else {
             const bool arranger = session.source == "arranger";
             ImGui::BeginDisabled(!arranger);
@@ -137,8 +140,10 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
             ImGui::EndDisabled();
             ImGui::SameLine();
             ImGui::Checkbox("Stop at loop end", &stopAtLoopEnd_);
-            ImGui::SetItemTooltip("On: record one take and stop.\nOff: every repetition of the "
-                                  "loop becomes a take until you stop.");
+            ImGui::SetItemTooltip(
+                "On: record one take and stop.\nOff: record one pass after another, "
+                "each a take, until you press Stop\n(with a short pause between "
+                "passes).");
         }
         ImGui::SameLine();
         ImGui::TextDisabled("|");
@@ -424,8 +429,12 @@ void CompView::drawSessionStatus(const State& state) {
     if (s.truncated) {
         ImGui::SameLine();
         ImGui::TextColored(color(palette_.warning), "Clip shorter than comp");
-        ImGui::SetItemTooltip(
-            "Notes after the end of the clip are not written; lengthen the clip.");
+        const auto bars = [&](const int steps) {
+            return static_cast<double>(steps) / static_cast<double>(state.barSteps);
+        };
+        ImGui::SetItemTooltip("The comp is %.2f bars long, the clip %.2f bars.\nNotes after the "
+                              "end of the clip are not written; lengthen the clip.",
+                              bars(state.length), bars(s.clipLength));
     }
 }
 

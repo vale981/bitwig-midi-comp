@@ -329,8 +329,10 @@ public class MidiCompExtension extends ControllerExtension
       if (live.link() != null)
          session = new StateJson.SessionStatus(live.link(), sessionAvailable(), isRecording(),
             live.isPending(),
-            clipSteps(sessionClip()) < model.length(), capture.passes(),
-            capture.isSinglePass());
+            compLongerThanClip(), sessionAvailable() ? clipSteps(sessionClip()) : -1,
+            capture.passes(),
+            capture.isSinglePass(),
+            capture.isRepeating());
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
          session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
@@ -434,13 +436,32 @@ public class MidiCompExtension extends ControllerExtension
    // ---------------------------------------------------------------------------------------------
    // Writing
 
+   /**
+    * Returns the length of a take from ``clip``: the clip's length, so that takes recorded into the
+    * comp clip are exactly as long as it. Only if the clip reports no length do the notes decide.
+    */
    private int lengthInSteps(final EditableClip clip, final List<NoteData> notes)
    {
-      double beats = clip.clip().getPlayStop().get();
+      final int clipLength = clipSteps(clip);
+      if (clipLength > 0)
+         return clipLength;
+      double beats = 0;
       for (final NoteData n : notes)
          beats = Math.max(beats, n.x() * stepSize + n.duration());
-      final int steps = (int) Math.ceil(beats / stepSize - 1e-9);
+      final int steps = (int) Math.ceil(beats / stepSize - 1e-6);
       return Math.min(GRID_WIDTH, Math.max(steps, barSteps()));
+   }
+
+   /**
+    * Returns whether the comp is noticeably longer than the session clip. Only meaningful while
+    * the clip is under its cursor; small differences from rounding are ignored.
+    */
+   private boolean compLongerThanClip()
+   {
+      if (!sessionAvailable())
+         return false;
+      final int tolerance = Math.max(1, (int) Math.round(0.25 / stepSize));
+      return model.length() > clipSteps(sessionClip()) + tolerance;
    }
 
    /** Returns the clip's length in steps, limited to the grid. */
@@ -461,7 +482,7 @@ public class MidiCompExtension extends ControllerExtension
 
    private String truncationNote(final EditableClip clip)
    {
-      if (clipSteps(clip) >= model.length())
+      if (clipSteps(clip) + Math.max(1, (int) Math.round(0.25 / stepSize)) >= model.length())
          return "";
       return String.format(". The clip ends at %s, before the comp (%s); notes after its end are "
          + "not written", formatPosition(clipSteps(clip) * stepSize),
@@ -651,6 +672,15 @@ public class MidiCompExtension extends ControllerExtension
          pushHistory(new HistoryEntry(clip, tick.firstWrite(), live.link()));
       if (tick.wrote())
          markDirty();
+
+      // Repeat mode: record the next pass once the comp has been written over the last one, so
+      // that the next pass starts from the clip's expected content.
+      if (capture.restartPending() && !live.isPending())
+      {
+         capture.takeRestartRequest();
+         log("Recording the next pass");
+         beginRecording();
+      }
    }
 
    /**
@@ -712,24 +742,34 @@ public class MidiCompExtension extends ControllerExtension
       if (isRecording())
          return Result.fail("Already recording");
 
+      if (stopAtEnd)
+         capture.armSinglePass();
+      else
+         capture.armRepeat();
+      log(stopAtEnd ? "Recording one pass of the loop" : "Recording passes until stopped");
+      beginRecording();
+      return Result.ok(stopAtEnd
+         ? "Recording one pass of the loop region"
+         : "Recording one pass after another until you press Stop");
+   }
+
+   /** Plays from the arranger loop start with arranger recording enabled. */
+   private void beginRecording()
+   {
       final double loopStart = transport.arrangerLoopStart().get();
       transport.isArrangerLoopEnabled().set(true);
       transport.playStartPosition().set(loopStart);
       transport.setPosition(loopStart);
       transport.isArrangerRecordEnabled().set(true);
-      if (stopAtEnd)
-         capture.armSinglePass();
       transport.play();
-      log(stopAtEnd ? "Recording one pass of the loop" : "Recording until stopped");
-      return Result.ok(stopAtEnd
-         ? "Recording one pass of the loop region"
-         : "Recording; every repetition of the loop becomes a take");
    }
 
    private Result stopRecording()
    {
+      final boolean repeating = capture.isRepeating();
+      capture.cancelRepeat();
       if (!transport.isPlaying().get())
-         return Result.fail("Not recording");
+         return repeating ? Result.ok("Stopped recording takes") : Result.fail("Not recording");
       stopTransportRecording();
       return Result.ok("Recording stopped");
    }

@@ -75,8 +75,10 @@ State document:
     "recording": false,             // Bitwig is recording into the clip
     "pending": false,               // comp changes wait to be written
     "truncated": false,             // the comp is longer than the clip
+    "clipLength": 2048,             // clip length in steps, -1 while it is not under its cursor
     "passes": 3,                    // loop passes recorded in this session
-    "singlePass": false             // recording stops at the end of the current pass
+    "singlePass": false,            // recording stops at the end of the current pass
+    "repeating": false              // passes are recorded one after another until stopped
   },
   "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [
@@ -101,8 +103,8 @@ Bitwig did not process the command within 5 s.
 |--------------|-----------------------------|--------|
 | `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. |
 | `end`        |                             | End the session; the clip keeps the comp. |
-| `record`     | `stopAtEnd=true\|false`     | Arranger sessions: record over the loop region from its start. With `stopAtEnd` (default) recording stops when the loop wraps and the pass becomes one take; otherwise every repetition becomes a take until `stopRecording`. |
-| `stopRecording` |                          | Stop the transport and arranger recording. |
+| `record`     | `stopAtEnd=true\|false`     | Arranger sessions: record over the loop region from its start. With `stopAtEnd` (default) recording stops when the loop wraps and the pass becomes one take; otherwise single passes are recorded one after another (`repeating`) until `stopRecording`. |
+| `stopRecording` |                          | Stop recording and end repeat mode. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
 | `addTake`    | `source=launcher\|arranger` | Copy the selected clip's notes as a new take. |
 | `removeTake` | `take`                      | Remove a take and its segments. |

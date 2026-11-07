@@ -21,9 +21,11 @@ Two parts:
 
 2. **Record.** Set the loop region over the clip and press *Record* in the companion: it plays
    from the loop start and records into the clip. With *Stop at loop end* (default) it stops when
-   the loop wraps and the pass becomes one take; without it every repetition becomes a take until
-   you press *Stop*. Recording in Bitwig directly works as well (each loop pass becomes a take);
-   launcher clips are recorded that way. Overdub is left as you set it: without it Bitwig records
+   the loop wraps and the pass becomes one take. Without it, it records one pass after another,
+   each a take, until you press *Stop*; there is a short pause between passes while the take is
+   collected. Recording in Bitwig directly (continuous loop recording) also splits passes into
+   takes, but only if Bitwig reports the notes while it records, which it may not do when it
+   records into a new clip; launcher clips are recorded that way. Overdub is left as you set it: without it Bitwig records
    into a new clip on top of the comp clip, which then becomes the comp clip. *Log* shows what the
    extension saw (recording, loop wraps, collected passes), which helps when a pass does not show
    up.

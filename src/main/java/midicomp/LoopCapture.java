@@ -22,7 +22,9 @@ import java.util.function.Consumer;
  * that cannot run (the clip is not under its cursor) are kept and run later, in order.
  *
  * In single-pass mode (:meth:`armSinglePass`) the first wrap ends the recording: the capture asks
- * for the transport to stop and, once stopped, takes everything new in the clip as one pass.
+ * for the transport to stop and, once stopped, takes everything new in the clip as one pass. In
+ * repeat mode (:meth:`armRepeat`) it then asks for the next single pass to be recorded, until
+ * :meth:`cancelRepeat`. This does not depend on Bitwig reporting notes while it records.
  *
  * Bitwig may add recorded notes to the clip only when recording ends, or shortly after. The
  * collection after recording therefore waits until the clip's notes have settled and, if nothing
@@ -73,6 +75,9 @@ final class LoopCapture
    private boolean singlePass;
    private boolean stopRequested;
    private boolean ignoreStop;
+   private boolean repeat;
+   private boolean awaitingRestart;
+   private boolean restartRequested;
 
    /**
     * Args:
@@ -100,6 +105,44 @@ final class LoopCapture
       singlePass = true;
    }
 
+   /** Records single passes one after another until :meth:`cancelRepeat`. */
+   void armRepeat()
+   {
+      singlePass = true;
+      repeat = true;
+   }
+
+   /** Ends repeat mode; the current pass, if any, still becomes a take. */
+   void cancelRepeat()
+   {
+      repeat = false;
+      singlePass = false;
+      awaitingRestart = false;
+      restartRequested = false;
+   }
+
+   /** Returns whether repeat mode is on. */
+   boolean isRepeating()
+   {
+      return repeat;
+   }
+
+   /** Returns whether the next pass is due (repeat mode), without clearing it. */
+   boolean restartPending()
+   {
+      return restartRequested;
+   }
+
+   /** Returns whether the next pass should be recorded now (repeat mode); clears it. */
+   boolean takeRestartRequest()
+   {
+      final boolean requested = restartRequested;
+      restartRequested = false;
+      if (requested)
+         singlePass = true;
+      return requested;
+   }
+
    /** Returns whether the single pass is complete and the transport should stop; clears it. */
    boolean takeStopRequest()
    {
@@ -121,6 +164,9 @@ final class LoopCapture
       singlePass = false;
       stopRequested = false;
       ignoreStop = false;
+      repeat = false;
+      awaitingRestart = false;
+      restartRequested = false;
       baseline = new HashMap<>();
       passes = 0;
       wasRecording = false;
@@ -180,8 +226,10 @@ final class LoopCapture
       {
          if (wrapped(position, playingStep))
          {
-            log.accept(String.format("Loop wrapped (position %.2f -> %.2f, step %d -> %d)",
-               lastPosition, position, lastStep, playingStep));
+            log.accept(String.format(
+               "Loop wrapped (position %.2f -> %.2f, step %d -> %d); clip shows %d notes, %d new",
+               lastPosition, position, lastStep, playingStep, clip.notes().all().size(),
+               countNew(clip)));
             if (singlePass)
             {
                // The pass is complete: stop, then collect everything once recording has ended.
@@ -200,9 +248,15 @@ final class LoopCapture
       {
          wasRecording = false;
          singlePass = false;
-         log.accept(ignoreStop
+         log.accept((ignoreStop
             ? "Recording stopped at the end of the loop"
-            : String.format("Recording stopped after %d wraps", wraps.size()));
+            : String.format("Recording stopped after %d wraps", wraps.size()))
+            + String.format("; clip shows %d notes, %d new", clip.notes().all().size(),
+               countNew(clip)));
+         // A manual stop ends repeat mode; a stop at the loop end continues it.
+         awaitingRestart = repeat && ignoreStop;
+         if (!ignoreStop)
+            repeat = false;
          ignoreStop = false;
          due.add(new Due(now + millis(COLLECT_DELAY_MILLIS), wraps.size(), true,
             now + millis(FINAL_WAIT_MILLIS)));
@@ -239,7 +293,24 @@ final class LoopCapture
          log.accept(String.format("Pass %d: %d notes -> take", next.pass() + 1, pass.size()));
          collected.add(pass);
       }
+
+      if (awaitingRestart && !recording && due.isEmpty())
+      {
+         awaitingRestart = false;
+         if (repeat)
+            restartRequested = true;
+      }
       return collected;
+   }
+
+   /** Returns how many notes in the clip are not part of the baseline. */
+   private int countNew(final EditableClip clip)
+   {
+      int count = 0;
+      for (final NoteData n : clip.notes().all())
+         if (!baseline.containsKey(n.cellKey()))
+            count++;
+      return count;
    }
 
    private static long millis(final long ms)

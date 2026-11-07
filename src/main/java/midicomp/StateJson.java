@@ -25,8 +25,10 @@ final class StateJson
     *    recording: whether Bitwig is recording into the clip.
     *    pending: whether comp changes wait to be written.
     *    truncated: whether the comp is longer than the clip.
+    *    clipLength: the clip's length in steps, or ``-1`` while it is not under its cursor.
     *    passes: loop passes recorded in this session.
     *    singlePass: whether recording stops at the end of the current pass.
+    *    repeating: whether passes are recorded one after another until stopped.
     */
    record SessionStatus(
       ClipRef clip,
@@ -34,8 +36,10 @@ final class StateJson
       boolean recording,
       boolean pending,
       boolean truncated,
+      int clipLength,
       int passes,
-      boolean singlePass)
+      boolean singlePass,
+      boolean repeating)
    {
    }
 
@@ -100,8 +104,10 @@ final class StateJson
             .append(",\"recording\":").append(session.recording())
             .append(",\"pending\":").append(session.pending())
             .append(",\"truncated\":").append(session.truncated())
+            .append(",\"clipLength\":").append(session.clipLength())
             .append(",\"passes\":").append(session.passes())
             .append(",\"singlePass\":").append(session.singlePass())
+            .append(",\"repeating\":").append(session.repeating())
             .append('}');
 
       sb.append(",\"takes\":[");
