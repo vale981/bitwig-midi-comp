@@ -9,6 +9,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(MIDICOMP_FETCH_DEPS "Download dependencies that are not installed" ON)
 set(MIDICOMP_DEFAULT_FONT "" CACHE FILEPATH "TTF font loaded at runtime when MIDICOMP_FONT is unset")
 set(MIDICOMP_EMBED_FONT "" CACHE FILEPATH "TTF font compiled into the binary as the fallback")
+# In the Nix dev shell MIDICOMP_FONT points at a font; keep it as the default so the binary also
+# finds it when started outside the shell.
+if(NOT MIDICOMP_DEFAULT_FONT AND DEFINED ENV{MIDICOMP_FONT})
+  set(MIDICOMP_DEFAULT_FONT "$ENV{MIDICOMP_FONT}" CACHE FILEPATH
+      "TTF font loaded at runtime when MIDICOMP_FONT is unset" FORCE)
+endif()
 
 include(FetchContent)
 find_package(OpenGL REQUIRED)

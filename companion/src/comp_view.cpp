@@ -436,10 +436,21 @@ float CompView::drawSteps(ImDrawList* dl, const ImVec2 origin, const float width
 }
 
 void CompView::drawMidiPicker() {
-    if (midi_ == nullptr)
-        return;
     const float scale = ImGui::GetFontSize() / 13.0f;
     const float h = ImGui::GetFrameHeight();
+    if (midi_ == nullptr) {
+        if (demoKeyboard_.empty())
+            return;
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + h * 0.35f, p.y + h * 0.5f),
+                                                    h * 0.18f, palette_.mutedText);
+        ImGui::Dummy(ImVec2(h * 0.7f, h));
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetNextItemWidth(170.0f * scale);
+        if (ImGui::BeginCombo("##keyboard", demoKeyboard_.c_str()))
+            ImGui::EndCombo();
+        return;
+    }
     const std::string port = midi_->portName();
 
     // Activity light: lit briefly by each note.
@@ -553,8 +564,9 @@ void CompView::drawSessionStatus(const State& state) {
                            std::max(1, s.recordingPass));
     } else if (!s.available) {
         ImGui::TextColored(color(palette_.warning), "%s",
-                           s.pending ? "Changes waiting: select a clip on its track"
-                                     : "Select a clip on its track to follow changes");
+                           s.collecting ? "Recording waiting: select a clip on its track"
+                           : s.pending  ? "Changes waiting: select a clip on its track"
+                                        : "Select a clip on its track to follow changes");
         ImGui::SetItemTooltip(
             "Bitwig only lets extensions edit the selected arranger clip. Any clip on the comp "
             "clip's track counts,\nincluding one Bitwig creates while recording. Launcher clips "

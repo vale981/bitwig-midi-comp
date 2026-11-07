@@ -76,6 +76,7 @@ struct Options {
     fs::path endpoint = midicomp::defaultEndpointPath();
     fs::path storeDir = midicomp::CompStore::defaultDir();
     std::optional<fs::path> screenshot;
+    std::string demoKeyboard;
 };
 
 void printUsage() {
@@ -87,6 +88,7 @@ void printUsage() {
         "                     (default ~/.midicomp/endpoint.json)\n"
         "  --store-dir DIR    where saved comps are kept\n"
         "  --screenshot FILE  render for a few seconds, save the window as PPM and exit\n"
+        "  --demo-keyboard NAME  show NAME as the keyboard without opening MIDI (screenshots)\n"
         "\n"
         "Environment: MIDICOMP_FONT=path/to/font.ttf overrides the UI font.");
 }
@@ -104,6 +106,8 @@ std::optional<Options> parseArgs(const int argc, char** argv) {
             options.storeDir = argv[++i];
         } else if (arg == "--screenshot" && hasValue) {
             options.screenshot = argv[++i];
+        } else if (arg == "--demo-keyboard" && hasValue) {
+            options.demoKeyboard = argv[++i];
         } else {
             printUsage();
             return std::nullopt;
@@ -219,9 +223,11 @@ int main(int argc, char** argv) {
     midicomp::CompView view;
     midicomp::CompStore store(options->storeDir);
     view.setStore(&store);
-    // Without --screenshot: rendered screenshots should not depend on the connected devices.
+    // Rendered screenshots should not depend on the connected devices.
     std::unique_ptr<midicomp::MidiInput> midi;
-    if (!options->screenshot) {
+    if (!options->demoKeyboard.empty()) {
+        view.setDemoKeyboard(options->demoKeyboard);
+    } else if (!options->screenshot) {
         midi = std::make_unique<midicomp::MidiInput>(
             midicomp::CompStore::defaultDir().parent_path() / "keyboard.txt",
             [] { glfwPostEmptyEvent(); });

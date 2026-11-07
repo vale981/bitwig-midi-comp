@@ -25,7 +25,12 @@ Two parts:
    clips; a clip on the comp track must be selected). It empties the clip, so the comp is not
    heard, and records from the loop start. With *Stop at loop end* (default) recording stops after
    one pass; without it, it continues until you press *Stop*, and every loop pass becomes a take.
-   When recording stops, the comp is written back.
+   Bitwig deselects the clip while it records, so when recording stops, click a clip on the comp
+   track in Bitwig; the companion grays out the lanes until you do. The passes then become takes
+   and the comp is written back. For launcher clips, record in Bitwig with the clip's loop on;
+   each pass becomes a take.
+
+   ![Ready to record](docs/screenshots/record.png)
 
    Without overdub, Bitwig keeps only the most recent pass at each loop position, and it hides
    the arranger clip from extensions while it records. The companion therefore reads your
@@ -49,7 +54,7 @@ Two parts:
    *Sharing the keyboard* below). *Log* shows what the extension saw (recording, loop wraps,
    assembled takes).
 
-   ![Waiting for the first pass](docs/screenshots/record.png)
+   ![Passes 4 and 5 being recorded](docs/screenshots/recording.png)
 
 3. **Comp.** Drag across a take lane to use that take for the range (snapped to the *Snap* grid);
    drag across the comp lane to make a range silent. The clip is rewritten as you edit. Each new
@@ -79,6 +84,8 @@ something on another track pauses writing until a clip on that track is selected
 also deselects the clip when recording, so after each recording a click on a clip of the track is
 needed to turn the recording into takes. While a click is needed, the companion grays out the lanes and
 says which track to click. Launcher clips are pinned by the session and have no such limit.
+
+![Waiting for a click in Bitwig after recording](docs/screenshots/select.png)
 
 **Saved comps.** The companion saves the current comp shortly after every change, one file per
 session, keeping the ten newest per clip. When you comp a clip with a saved comp in the same
@@ -182,6 +189,7 @@ python3 tools/midi_copies.py run          # keep it running, e.g. as a systemd u
 - `--endpoint FILE`: discovery file (default `~/.midicomp/endpoint.json`).
 - `--store-dir DIR`: where saved comps are kept.
 - `--screenshot FILE`: render for three seconds, save the window as PPM and exit.
+- `--demo-keyboard NAME`: show `NAME` in the keyboard picker without opening MIDI (screenshots).
 - `MIDICOMP_FONT=/path/to/font.ttf`: UI font. Release builds embed Roboto; the Nix build uses Inter.
 
 ### Theme
@@ -229,12 +237,15 @@ against a mock of the API:
 
 ```sh
 python3 tools/mock_api.py 18799 /tmp/mock-endpoint.json session &   # or: start, record, recording, select
-xvfb-run -s "-screen 0 1280x760x24" \
-  ./companion/build/midicomp-companion --endpoint /tmp/mock-endpoint.json --screenshot out.ppm
+env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x760x24" \
+  ./companion/build/midicomp-companion --endpoint /tmp/mock-endpoint.json \
+  --demo-keyboard "USB Axiom 61" --screenshot out.ppm
 ```
 
-On NixOS, point `LD_LIBRARY_PATH` at Mesa's `lib` directory and set
-`__GLX_VENDOR_LIBRARY_NAME=mesa`. Pass `--theme-dir` with an empty directory for stock colors.
+GLFW prefers Wayland when `WAYLAND_DISPLAY` is set, so without unsetting it the window opens on
+the desktop instead of Xvfb. Pass `--theme-dir` with an empty directory for stock colors; the
+README images use Rose Pine Dawn and, in the Theme section, the stock colors. `start.png` and
+`record.png` are cropped to 450 and 345 pixels in height.
 
 ## Limitations
 

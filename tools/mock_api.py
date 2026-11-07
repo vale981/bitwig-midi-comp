@@ -4,8 +4,8 @@ Usage: python3 tools/mock_api.py PORT ENDPOINT_FILE [start|record|session|record
 
 ``start`` serves the state before a comp session (a clip selected in Bitwig), ``record`` a session
 before the first pass, ``session`` (the default) a session with six recorded passes,
-``recording`` the same while two more passes are being recorded, and ``select`` the session
-waiting for a clip to be selected in Bitwig.
+``recording`` three takes while two more passes are being recorded, and ``select`` the same
+after recording, waiting for a clip to be selected in Bitwig.
 """
 import json
 import random
@@ -59,12 +59,20 @@ else:  # session, recording, select
                          "truncated": False, "passes": 6},
              "takes": takes, "segments": segments, "comp": comp}
 if mode in ("recording", "select"):
+    # Three takes, so the passes being recorded fit below them.
+    state["takes"] = takes[:3]
+    state["segments"] = [[0, 2048, 1], [2048, 3072, 3], [3072, 4096, 2]]
+    state["comp"] = [n[:5] + [tid] for f, t, tid in state["segments"]
+                     for n in takes[tid - 1]["notes"] if f <= n[0] < t]
+    state["message"] = "Recording; every pass of the loop becomes a take"
     session = state["session"]
+    session["passes"] = 3
     session["track"] = "Keys"
     session["preview"] = [{"pass": 7, "notes": take_notes(7, 60)},
-                          {"pass": 8, "notes": [n for n in take_notes(8, 62) if n[0] < 2600]}]
+                          {"pass": 5, "notes": [n for n in take_notes(8, 62) if n[0] < 2600]}]
+    session["preview"][0]["pass"] = 4
     if mode == "recording":
-        session.update(recording=True, available=False, recordingPass=8)
+        session.update(recording=True, available=False, recordingPass=5)
     else:
         session.update(available=False, collecting=True)
 body = json.dumps(state).encode()

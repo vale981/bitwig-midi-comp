@@ -9,6 +9,7 @@
 #include <atomic>
 #include <imgui.h>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace midicomp {
@@ -54,6 +55,14 @@ class CompView {
      *     midi: the keyboard input; must outlive the view.
      */
     void setMidi(MidiInput* midi) { midi_ = midi; }
+
+    /**
+     * Shows a keyboard name in the picker without MIDI input, for screenshots.
+     *
+     * Args:
+     *     name: the name to show.
+     */
+    void setDemoKeyboard(std::string name) { demoKeyboard_ = std::move(name); }
 
     /** Returns whether an interaction is in progress and the UI should redraw continuously. */
     [[nodiscard]] bool animating() const { return drag_.has_value() || redraw_; }
@@ -139,6 +148,7 @@ class CompView {
 
     // Keyboard input.
     MidiInput* midi_ = nullptr;
+    std::string demoKeyboard_;
     std::vector<std::string> midiPorts_;  ///< Listed when the picker opens.
     std::int64_t lastMidiPost_ = 0;
 
