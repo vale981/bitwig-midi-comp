@@ -14,12 +14,18 @@ import java.util.function.Supplier;
  * The content written last is kept as :meth:`expected`; it is the baseline for detecting newly
  * recorded notes.
  *
+ * Each write is verified once the clip has settled: if the cells holding notes differ from what
+ * was written (a note the cursor had not reported when the diff was made, or a write the host did
+ * not apply), the range is written again, up to :member:`MAX_REPAIRS` times per change.
+ *
  * All methods run on the controller thread.
  */
 final class LiveSync
 {
    /** Time without note updates before a clip's mirror is trusted. */
    static final long SETTLE_MILLIS = 150;
+   /** Repeated writes after a verification failure, per comp change. */
+   static final int MAX_REPAIRS = 3;
 
    /**
     * Result of :meth:`tick`.
@@ -27,10 +33,12 @@ final class LiveSync
     * Args:
     *    wrote: whether the clip was written.
     *    firstWrite: the first write after linking, for restoring the original; otherwise ``null``.
+    *    leftover: notes found in the clip that the last write should have removed (0 if no check).
+    *    missing: notes the last write should have created but the clip lacks (0 if no check).
     */
-   record Tick(boolean wrote, CompOperation firstWrite)
+   record Tick(boolean wrote, CompOperation firstWrite, int leftover, int missing)
    {
-      static final Tick NONE = new Tick(false, null);
+      static final Tick NONE = new Tick(false, null, 0, 0);
    }
 
    private ClipRef link;
@@ -38,6 +46,8 @@ final class LiveSync
    private boolean firstWritePending;
    private List<NoteData> expected = List.of();
    private int lastLength;
+   private boolean verifyPending;
+   private int repairs;
 
    ClipRef link()
    {
@@ -70,6 +80,8 @@ final class LiveSync
       firstWritePending = true;
       expected = List.copyOf(content);
       lastLength = 0;
+      verifyPending = false;
+      repairs = 0;
    }
 
    void unlink()
@@ -83,7 +95,10 @@ final class LiveSync
    void markDirty()
    {
       if (link != null)
+      {
          dirty = true;
+         repairs = 0;
+      }
    }
 
    /**
@@ -113,8 +128,24 @@ final class LiveSync
       final Supplier<List<NoteData>> desired,
       final int length)
    {
-      if (link == null || !dirty || !available || !clip.isSettled(SETTLE_MILLIS))
+      if (link == null || !available || !clip.isSettled(SETTLE_MILLIS))
          return Tick.NONE;
+
+      if (!dirty)
+      {
+         if (!verifyPending)
+            return Tick.NONE;
+         verifyPending = false;
+         final int[] diff = clip.cellDifference(0, lastLength, expected);
+         if (diff[0] == 0 && diff[1] == 0)
+            return Tick.NONE;
+         if (repairs < MAX_REPAIRS)
+         {
+            repairs++;
+            dirty = true;
+         }
+         return new Tick(false, null, diff[0], diff[1]);
+      }
 
       final List<NoteData> notes = desired.get();
       // Cover the previous length too, so that notes beyond a shortened comp are removed.
@@ -128,9 +159,10 @@ final class LiveSync
       expected = List.copyOf(next);
       lastLength = range;
       dirty = false;
+      verifyPending = true;
 
       final CompOperation first = firstWritePending ? op : null;
       firstWritePending = false;
-      return new Tick(true, first);
+      return new Tick(true, first, 0, 0);
    }
 }

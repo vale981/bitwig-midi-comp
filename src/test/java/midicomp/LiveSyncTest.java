@@ -202,4 +202,40 @@ class LiveSyncTest
       settle();
       assertEquals(0, fake.cells.size());
    }
+
+   @Test
+   void aNoteReportedAfterTheWriteIsRemovedByTheCheck()
+   {
+      link();
+      assertTrue(tick().wrote());
+      // The host reports a note the diff did not know about, right after the write.
+      fake.userAdd(200, 72, 0.9, 0.5);
+      settle();
+
+      final LiveSync.Tick check = tick();
+      assertFalse(check.wrote());
+      assertEquals(1, check.leftover());
+      assertTrue(live.isPending());
+
+      assertTrue(tick().wrote());
+      settle();
+      assertTrue(Double.isNaN(fake.velocityAt(200, 72)));
+      final LiveSync.Tick again = tick();
+      assertEquals(0, again.leftover());
+      assertFalse(live.isPending());
+   }
+
+   @Test
+   void editsAfterTheCheckStayUntilTheNextChange()
+   {
+      link();
+      tick();
+      settle();
+      assertEquals(0, tick().leftover()); // verified
+
+      fake.userAdd(200, 72, 0.9, 0.5);
+      settle();
+      assertFalse(tick().wrote());
+      assertFalse(Double.isNaN(fake.velocityAt(200, 72)));
+   }
 }

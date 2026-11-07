@@ -138,6 +138,9 @@ the step size, so `import` can rescale positions if the timing resolution change
 - The session clip is rewritten whenever the comp changes. Writes are diffs: removed notes are
   cleared, new notes created, changed notes updated in place. Nothing is written past the end of
   the clip.
+- Each write is checked once the clip has settled: notes left in the written range that should
+  have been removed (for example ones Bitwig reported only after the write) are removed, and
+  missing ones written again, up to three times per change. The log reports each repair.
 - Launcher sessions pin a cursor to the clip, so writing does not depend on the selection.
   Arranger clips cannot be pinned: changes wait (`pending`) until the clip is selected again.
 - After a selection change the extension waits until Bitwig has stopped reporting note updates

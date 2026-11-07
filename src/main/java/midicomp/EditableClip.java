@@ -156,6 +156,36 @@ final class EditableClip
          range, clip.getPlayStop().get(), clip.playingStep().get());
    }
 
+   /**
+    * Compares which cells in ``[from, to)`` hold notes with ``expected``, ignoring attributes.
+    *
+    * Args:
+    *    from: first step, inclusive.
+    *    to: last step, exclusive.
+    *    expected: the notes the range should contain.
+    *
+    * Returns:
+    *    ``{leftover, missing}``: notes in the clip that are not expected, and expected notes that
+    *    are not in the clip.
+    */
+   int[] cellDifference(final int from, final int to, final List<NoteData> expected)
+   {
+      final java.util.Set<Long> wanted = new java.util.HashSet<>();
+      for (final NoteData n : expected)
+         if (n.x() >= from && n.x() < to)
+            wanted.add(n.cellKey());
+      int leftover = 0;
+      int present = 0;
+      for (final NoteData n : notes.startingIn(from, to))
+      {
+         if (wanted.contains(n.cellKey()))
+            present++;
+         else
+            leftover++;
+      }
+      return new int[] { leftover, wanted.size() - present };
+   }
+
    /** Returns whether no note updates arrived for ``quietMillis``. */
    boolean isSettled(final long quietMillis)
    {

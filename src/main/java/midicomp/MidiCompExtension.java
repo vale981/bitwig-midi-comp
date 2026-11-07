@@ -795,6 +795,10 @@ public class MidiCompExtension extends ControllerExtension
          pushHistory(new HistoryEntry(clip, tick.firstWrite(), live.link()));
       if (tick.wrote())
          markDirty();
+      if (tick.leftover() > 0 || tick.missing() > 0)
+         log(String.format("Clip check after writing: %d leftover notes, %d missing; %s",
+            tick.leftover(), tick.missing(),
+            live.isPending() ? "writing again" : "giving up after repeated attempts"));
 
    }
 
