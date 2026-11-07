@@ -20,7 +20,7 @@ class CompModelTest
 
    private static Take add(final CompModel m, final String name, final NoteData... notes)
    {
-      return m.addTake(name, Take.Source.LAUNCHER, null, 512, List.of(notes));
+      return m.addTake(name, Take.Source.LAUNCHER, 512, List.of(notes));
    }
 
    @Test

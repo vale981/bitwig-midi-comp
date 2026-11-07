@@ -5,9 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Takes and the assignment of time ranges to takes.
@@ -66,7 +64,6 @@ final class CompModel
     * Args:
     *    name: display name.
     *    source: where the notes came from.
-    *    origin: the clip the take follows, or ``null``.
     *    length: length in steps.
     *    notes: the notes.
     *
@@ -76,65 +73,14 @@ final class CompModel
    Take addTake(
       final String name,
       final Take.Source source,
-      final ClipRef origin,
       final int length,
       final List<NoteData> notes)
    {
-      final Take take = new Take(nextId++, name, source, origin, length, List.copyOf(notes));
+      final Take take = new Take(nextId++, name, source, length, List.copyOf(notes));
       takes.add(take);
       if (segments.isEmpty())
          assign(0, length, take.id());
       return take;
-   }
-
-   /**
-    * Replaces the notes and length of a take, keeping its identity and segments.
-    *
-    * Args:
-    *    id: take identifier.
-    *    length: new length in steps.
-    *    notes: new notes.
-    *
-    * Returns:
-    *    Whether the take existed and changed.
-    */
-   boolean updateTake(final int id, final int length, final List<NoteData> notes)
-   {
-      for (int i = 0; i < takes.size(); i++)
-      {
-         final Take t = takes.get(i);
-         if (t.id() != id)
-            continue;
-         if (t.length() == length && sameNotes(t.notes(), notes))
-            return false;
-         takes.set(i, new Take(t.id(), t.name(), t.source(), t.origin(), length,
-            List.copyOf(notes)));
-         return true;
-      }
-      return false;
-   }
-
-   /**
-    * Returns whether two note lists contain the same notes, ignoring order and selection.
-    *
-    * Args:
-    *    a: first list.
-    *    b: second list.
-    */
-   static boolean sameNotes(final List<NoteData> a, final List<NoteData> b)
-   {
-      if (a.size() != b.size())
-         return false;
-      final Map<Long, NoteData> byCell = new HashMap<>();
-      for (final NoteData n : a)
-         byCell.put(n.cellKey(), n);
-      for (final NoteData n : b)
-      {
-         final NoteData other = byCell.get(n.cellKey());
-         if (other == null || !other.sameAs(n))
-            return false;
-      }
-      return true;
    }
 
    Take take(final int id)

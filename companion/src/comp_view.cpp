@@ -72,7 +72,7 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
 
         if (ImGui::Button("Add take..."))
             ImGui::OpenPopup("addTake");
-        ImGui::SetItemTooltip("Use a clip recorded elsewhere as a take");
+        ImGui::SetItemTooltip("Copy the notes of a clip recorded elsewhere as a new take");
         if (ImGui::BeginPopup("addTake")) {
             const std::string launcherItem =
                 "Selected launcher clip" + (haveLauncher ? ": " + *state->launcherSel : "");

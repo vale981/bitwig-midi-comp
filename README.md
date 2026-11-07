@@ -34,9 +34,10 @@ Two parts:
 4. **Finish.** *Done* ends the session; the clip keeps the comp. *Revert* restores the clip as it
    was before the session and ends it.
 
-Takes recorded elsewhere (another track or launcher slot) can be added with *Add take*. They must
-start at the same position as the comp clip, and each arranger take needs its own track. While
-such a clip is selected in Bitwig, edits made to it update the take.
+Takes recorded elsewhere (another track or launcher slot) can be added with *Add take*, which
+copies the selected clip's notes. They must start at the same position as the comp clip. A take is
+a copy: recording over or editing the source clip later does not change it, so the same clip can
+be recorded again and added as another take.
 
 **Editing keys** (pointer over the lanes): `1`-`9` use the n-th take for the grid cell under the
 pointer, `0` or `Delete` clears it, `Ctrl+Z` undoes the last edit, `Ctrl`+wheel zooms,

@@ -25,7 +25,8 @@ A wrong token gets `401`, another `Host` gets `403`.
 
 - **Session**: the clip being comped. Starting a session captures the clip's notes as the first
   take, switches overdub on, and from then on rewrites the clip whenever the comp changes.
-- **Takes**: loop passes recorded into the session clip, plus clips added with `addTake`.
+- **Takes**: copies of notes: loop passes recorded into the session clip, plus clips copied with
+  `addTake`. A take does not change when its source clip changes.
 - **Segments**: ranges of the comp and the take that plays there; gaps are silent.
 
 Positions and lengths are **grid steps**. `stepsPerBeat` converts to beats (quarter notes);
@@ -98,7 +99,7 @@ Bitwig did not process the command within 5 s.
 | `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. |
 | `end`        |                             | End the session; the clip keeps the comp. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
-| `addTake`    | `source=launcher\|arranger` | Add the selected clip as a take. |
+| `addTake`    | `source=launcher\|arranger` | Copy the selected clip's notes as a new take. |
 | `removeTake` | `take`                      | Remove a take and its segments. |
 | `assign`     | `take`, `from`, `to`        | Use `take` for `[from, to)`. |
 | `clear`      | `from`, `to`                | Make `[from, to)` silent. |
@@ -117,5 +118,3 @@ Bitwig did not process the command within 5 s.
 - While Bitwig records into the clip nothing is written. Each wrap of the loop (transport jump,
   or the clip's playing step jumping back for launcher clips) and the end of recording close a
   pass; its new notes become a take. Afterwards the comp is written over the recording.
-- Takes added with `addTake` follow their clip: while it is selected (launcher: same track and
-  scene; arranger: same track), its notes are re-read and the take is updated.

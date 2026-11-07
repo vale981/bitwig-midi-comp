@@ -31,10 +31,10 @@ class LiveSyncTest
       model = new CompModel();
       live = new LiveSync();
 
-      a = model.addTake("A", Take.Source.LAUNCHER, null, 512, List.of(
+      a = model.addTake("A", Take.Source.LAUNCHER, 512, List.of(
          CompModelTest.note(0, 60, 0.5), CompModelTest.note(128, 62, 0.5),
          CompModelTest.note(256, 64, 0.5), CompModelTest.note(384, 65, 0.5)));
-      b = model.addTake("B", Take.Source.LAUNCHER, null, 512, List.of(
+      b = model.addTake("B", Take.Source.LAUNCHER, 512, List.of(
          CompModelTest.note(0, 48, 0.5), CompModelTest.note(128, 50, 0.5),
          CompModelTest.note(256, 52, 0.5), CompModelTest.note(384, 53, 0.5)));
 

@@ -101,8 +101,6 @@ public class MidiCompExtension extends ControllerExtension
    private double stepSize = RESOLUTION_STEPS[1];
    /** The user's overdub setting before the session enabled it, restored when the session ends. */
    private boolean overdubBefore;
-   private long launcherRefreshVersion = Long.MIN_VALUE;
-   private long arrangerRefreshVersion = Long.MIN_VALUE;
 
    private final ConcurrentLinkedQueue<Command> commands = new ConcurrentLinkedQueue<>();
    private CompServer server;
@@ -287,8 +285,6 @@ public class MidiCompExtension extends ControllerExtension
          c.reply().complete(Json.reply(result.ok(), result.message()));
       }
 
-      refreshTake(launcherSel, Take.Source.LAUNCHER);
-      refreshTake(arranger, Take.Source.ARRANGER);
       tickSession();
 
       if (stateDirty && server != null)
@@ -378,16 +374,24 @@ public class MidiCompExtension extends ControllerExtension
          return Result.fail(selectHint(clip, "a MIDI clip"));
       if (ref.sameClip(live.link()))
          return Result.fail("This is the clip being comped; record into it to add takes");
-      if (takeAt(ref) != null)
-         return Result.fail(ref.label() + " is already a take");
       if (!clip.isSettled(LiveSync.SETTLE_MILLIS))
          return Result.fail("Bitwig is still sending the clip's notes; try again");
 
       final List<NoteData> notes = clip.notes().all();
-      final Take take = model.addTake(ref.label(), ref.source(), ref, lengthInSteps(clip, notes),
-         notes);
+      final Take take = model.addTake(uniqueTakeName(ref.label()), ref.source(),
+         lengthInSteps(clip, notes), notes);
       return Result.ok(
-         String.format("Added take %d: %s (%d notes)", take.id(), ref.label(), notes.size()));
+         String.format("Copied %s as take %d (%d notes)", take.name(), take.id(), notes.size()));
+   }
+
+   /** Returns ``base``, numbered if a take of that name exists (the same clip added again). */
+   private String uniqueTakeName(final String base)
+   {
+      int count = 0;
+      for (final Take t : model.takes())
+         if (t.name().equals(base) || t.name().startsWith(base + " "))
+            count++;
+      return count == 0 ? base : base + " " + (count + 1);
    }
 
    private Result assign(final int from, final int to, final int takeId)
@@ -401,42 +405,6 @@ public class MidiCompExtension extends ControllerExtension
       model.assign(clampedFrom, clampedTo, takeId);
       return Result.ok(String.format("%s %s to %s", takeId < 0 ? "Cleared" : "Take " + takeId + ":",
          formatPosition(clampedFrom * stepSize), formatPosition(clampedTo * stepSize)));
-   }
-
-   /**
-    * Updates the take shown by ``clip`` from Bitwig once its notes have settled.
-    *
-    * Arranger takes are identified by track, so each arranger take needs its own track.
-    */
-   private void refreshTake(final EditableClip clip, final Take.Source source)
-   {
-      final boolean launcher = source == Take.Source.LAUNCHER;
-      final long seen = launcher ? launcherRefreshVersion : arrangerRefreshVersion;
-      if (clip.version() == seen || !clip.exists() || !clip.isSettled(LiveSync.SETTLE_MILLIS))
-         return;
-      if (launcher)
-         launcherRefreshVersion = clip.version();
-      else
-         arrangerRefreshVersion = clip.version();
-
-      final Take take = takeAt(refOf(clip));
-      if (take == null)
-         return;
-
-      final List<NoteData> notes = clip.notes().all();
-      if (model.updateTake(take.id(), lengthInSteps(clip, notes), notes))
-      {
-         live.markDirty();
-         markDirty();
-      }
-   }
-
-   private Take takeAt(final ClipRef ref)
-   {
-      for (final Take t : model.takes())
-         if (t.origin() != null && t.origin().sameClip(ref))
-            return t;
-      return null;
    }
 
    // ---------------------------------------------------------------------------------------------
@@ -578,7 +546,7 @@ public class MidiCompExtension extends ControllerExtension
       // What the clip holds now becomes the first take, and the content the sync expects.
       final List<NoteData> content = selected.notes().all();
       if (!content.isEmpty())
-         model.addTake("Original", ref.source(), null, lengthInSteps(selected, content), content);
+         model.addTake("Original", ref.source(), lengthInSteps(selected, content), content);
       if (ref.source() == Take.Source.LAUNCHER)
          pinTargetToSelection();
       // Without overdub, Bitwig records into a new clip on top of the comp clip.
@@ -674,7 +642,7 @@ public class MidiCompExtension extends ControllerExtension
    private void addPass(final EditableClip clip, final List<NoteData> pass)
    {
       final boolean untouched = model.segments().size() <= 1;
-      final Take take = model.addTake("Pass " + capture.passes(), live.link().source(), null,
+      final Take take = model.addTake("Pass " + capture.passes(), live.link().source(),
          lengthInSteps(clip, clip.notes().all()), pass);
       if (untouched)
          model.assign(0, model.length(), take.id());
