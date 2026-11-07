@@ -108,6 +108,18 @@ class CompView {
     void handleKeys(ApiClient& client, const State& state, const Layout& layout);
     void drawTakeHeader(ApiClient& client, const State& state, const Take& take, float y,
                         float height) const;
+    void drawPreviewHeader(const State& state, const PreviewPass& pass, float y,
+                           float height) const;
+    /**
+     * Grays out the area below the toolbar and explains that a clip must be selected in
+     * Bitwig.
+     *
+     * Args:
+     *     state: current state, with a session.
+     *     origin: screen position of the area's top left corner.
+     *     size: size of the area.
+     */
+    void drawSelectOverlay(const State& state, ImVec2 origin, ImVec2 size) const;
 
     [[nodiscard]] int stepAt(const Layout& layout, float screenX) const;
     [[nodiscard]] int gridSteps(const State& state) const;
@@ -148,6 +160,9 @@ class CompView {
     float scrollX_ = 0.0f;                   ///< Horizontal scroll shared by both lane areas.
     std::optional<float> requestedScrollX_;  ///< Scroll position to apply next frame.
     bool redraw_ = false;                    ///< Another frame is needed to settle the layout.
+    bool inputBlocked_ = false;              ///< A clip must be selected in Bitwig before editing.
+    int laneCount_ = -1;                     ///< Lanes shown last frame, ``-1`` outside a session.
+    bool scrollToBottom_ = false;            ///< Scroll the take area to the newest lane.
 };
 
 }  // namespace midicomp

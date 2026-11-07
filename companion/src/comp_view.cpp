@@ -14,6 +14,9 @@ namespace midicomp {
 
 namespace {
 
+/** Lane identifier passed to ``drawNotes`` for passes being recorded. */
+constexpr int kPreviewLane = -2;
+
 std::string str(const int value) {
     return std::to_string(value);
 }
@@ -77,14 +80,76 @@ void CompView::draw(ApiClient& client) {
         return;
     }
     if (!state->session) {
+        laneCount_ = -1;
         drawStart(client, *state);
         return;
     }
-    if (state->takes.empty()) {
+
+    // New lanes (takes, or passes being recorded) appear at the bottom; scroll to them.
+    const int lanes = static_cast<int>(state->takes.size() + state->preview().size());
+    if (laneCount_ >= 0 && lanes > laneCount_)
+        scrollToBottom_ = true;
+    laneCount_ = lanes;
+
+    // Arranger clips can only be edited while selected; Bitwig hides them while recording.
+    const Session& session = *state->session;
+    inputBlocked_ = !session.available && !session.recording;
+    const ImVec2 areaPos = ImGui::GetCursorScreenPos();
+    const ImVec2 areaSize = ImGui::GetContentRegionAvail();
+    ImGui::BeginDisabled(inputBlocked_);
+    if (lanes == 0)
         drawRecordHint(*state);
-        return;
-    }
-    drawLanes(client, *state);
+    else
+        drawLanes(client, *state);
+    ImGui::EndDisabled();
+    if (inputBlocked_)
+        drawSelectOverlay(*state, areaPos, areaSize);
+}
+
+void CompView::drawSelectOverlay(const State& state, const ImVec2 origin, const ImVec2 size) const {
+    const Session& session = *state.session;
+    // A child window submitted last is drawn over the lane areas.
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::BeginChild("selectOverlay", size, ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground |
+                          ImGuiWindowFlags_NoScrollbar);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y),
+                      withAlpha(palette_.windowBg, 0.72f));
+
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    ImFont* font = ImGui::GetFont();
+    const float fontSize = ImGui::GetFontSize();
+    const std::string track = session.track.empty() ? "comp" : "\"" + session.track + "\"";
+    const std::string title = "Click a clip on the " + track + " track in Bitwig";
+    const char* reason =
+        session.collecting
+            ? "The recording is ready. MIDI Comp can read it only from the selected clip."
+        : session.pending
+            ? "Comp changes are waiting. Bitwig lets extensions edit only the selected arranger "
+              "clip."
+            : "Bitwig lets extensions edit only the selected arranger clip. Editing resumes once "
+              "a clip on that track is selected.";
+
+    const float titleSize = fontSize * 1.5f;
+    const ImVec2 titleExtent = font->CalcTextSizeA(titleSize, FLT_MAX, 0.0f, title.c_str());
+    const ImVec2 reasonExtent = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, reason);
+    const float padding = 16.0f * scale;
+    const float boxWidth = std::max(titleExtent.x, reasonExtent.x) + 2.0f * padding;
+    const float boxHeight = titleExtent.y + reasonExtent.y + 2.0f * padding + 6.0f * scale;
+    const ImVec2 boxMin(origin.x + (size.x - boxWidth) * 0.5f,
+                        origin.y + std::max(padding, (size.y - boxHeight) * 0.4f));
+    const ImVec2 boxMax(boxMin.x + boxWidth, boxMin.y + boxHeight);
+    dl->AddRectFilled(boxMin, boxMax, palette_.headerBg, 6.0f * scale);
+    dl->AddRect(boxMin, boxMax, palette_.warning, 6.0f * scale, 0, 1.5f * scale);
+    dl->AddText(font, titleSize,
+                ImVec2(boxMin.x + (boxWidth - titleExtent.x) * 0.5f, boxMin.y + padding),
+                palette_.warning, title.c_str());
+    dl->AddText(font, fontSize,
+                ImVec2(boxMin.x + (boxWidth - reasonExtent.x) * 0.5f,
+                       boxMin.y + padding + titleExtent.y + 6.0f * scale),
+                palette_.mutedText, reason);
+    ImGui::EndChild();
 }
 
 void CompView::drawToolbar(ApiClient& client, const State* state) {
@@ -528,10 +593,11 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
                       ImGui::GetContentRegionAvail().y - footerHeight);
     const float compHeight = std::clamp(area.y * 0.28f, 110.0f * scale, 180.0f * scale);
     const float topHeight = rulerHeight + compHeight;
-    const float takeHeight =
-        std::clamp((area.y - topHeight - style.ScrollbarSize) /
-                       static_cast<float>(std::max<std::size_t>(1, state.takes.size())),
-                   64.0f * scale, 150.0f * scale);
+    const auto& preview = state.preview();
+    const std::size_t laneCount = state.takes.size() + preview.size();
+    const float takeHeight = std::clamp((area.y - topHeight - style.ScrollbarSize) /
+                                            static_cast<float>(std::max<std::size_t>(1, laneCount)),
+                                        64.0f * scale, 150.0f * scale);
 
     std::optional<float> applyScroll = std::exchange(requestedScrollX_, std::nullopt);
     redraw_ = false;
@@ -625,7 +691,13 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
         const Layout layout = makeLayout();
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImGui::SetCursorPos(ImVec2(0, 0));
-        ImGui::Dummy(ImVec2(contentWidth, static_cast<float>(state.takes.size()) * takeHeight));
+        ImGui::Dummy(ImVec2(contentWidth, static_cast<float>(laneCount) * takeHeight));
+        if (scrollToBottom_) {
+            // The cursor is below the content: bring the end into view on the next frame.
+            ImGui::SetScrollHereY(1.0f);
+            scrollToBottom_ = false;
+            redraw_ = true;
+        }
 
         float y = 0.0f;
         for (const auto& take : state.takes) {
@@ -640,9 +712,24 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
                 palette_.laneSeparator);
             y += takeHeight;
         }
+        // Passes being recorded: provisional, not editable.
+        for (const auto& pass : preview) {
+            laneRect(dl, layout, y, takeHeight, palette_.laneBg);
+            drawGrid(dl, state, layout, y, takeHeight);
+            drawNotes(dl, pass.notes, state, layout, y, takeHeight, kPreviewLane);
+            dl->AddLine(
+                ImVec2(layout.origin.x, layout.origin.y + y + takeHeight - 1.0f),
+                ImVec2(layout.origin.x + contentWidth, layout.origin.y + y + takeHeight - 1.0f),
+                palette_.laneSeparator);
+            y += takeHeight;
+        }
         y = 0.0f;
         for (const auto& take : state.takes) {
             drawTakeHeader(client, state, take, y, takeHeight);
+            y += takeHeight;
+        }
+        for (const auto& pass : preview) {
+            drawPreviewHeader(state, pass, y, takeHeight);
             y += takeHeight;
         }
         handleKeys(client, state, layout);
@@ -763,7 +850,9 @@ void CompView::drawNotes(ImDrawList* dl, const std::vector<Note>& notes, const S
 
         ImU32 color = 0;
         const float alpha = 0.45f + 0.55f * static_cast<float>(n.velocity);
-        if (laneTake < 0)
+        if (laneTake == kPreviewLane)
+            color = withAlpha(palette_.error, 0.3f + 0.4f * static_cast<float>(n.velocity));
+        else if (laneTake < 0)
             color = palette_.take(n.take, alpha);
         else if (insideSegmentOf(state, laneTake, n.x))
             color = palette_.take(laneTake, alpha);
@@ -838,7 +927,7 @@ void CompView::handleLaneInput(ApiClient& client, const State& state, const Layo
 }
 
 void CompView::handleKeys(ApiClient& client, const State& state, const Layout& layout) {
-    if (!ImGui::IsWindowHovered() || ImGui::GetIO().WantTextInput || drag_)
+    if (inputBlocked_ || !ImGui::IsWindowHovered() || ImGui::GetIO().WantTextInput || drag_)
         return;
     const int step = stepAt(layout, ImGui::GetIO().MousePos.x);
     const auto cell = snapRange(step, step, gridSteps(state), state.length);
@@ -854,6 +943,30 @@ void CompView::handleKeys(ApiClient& client, const State& state, const Layout& l
     }
     if (ImGui::IsKeyPressed(ImGuiKey_0, false) || ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         commitRange(client, state, -1, cell->first, cell->second - 1);
+}
+
+void CompView::drawPreviewHeader(const State& state, const PreviewPass& pass, const float y,
+                                 const float height) const {
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    const float hx = ImGui::GetWindowPos().x;
+    const float top = ImGui::GetWindowPos().y - ImGui::GetScrollY() + y;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    dl->AddRectFilled(ImVec2(hx, top), ImVec2(hx + 190.0f * scale, top + height),
+                      palette_.headerBg);
+    dl->AddRectFilled(ImVec2(hx, top), ImVec2(hx + 4.0f * scale, top + height),
+                      withAlpha(palette_.error, 0.6f));
+    const Session& session = *state.session;
+    const std::string title = "Pass " + str(pass.pass);
+    const char* status = session.recording    ? "recording"
+                         : session.collecting ? "waiting for the clip"
+                                              : "being added";
+    dl->PushClipRect(ImVec2(hx, top), ImVec2(hx + 186.0f * scale, top + height), true);
+    dl->AddText(ImVec2(hx + 10.0f * scale, top + 6.0f * scale), palette_.text, title.c_str());
+    dl->AddText(ImVec2(hx + 10.0f * scale, top + 22.0f * scale), palette_.mutedText, status);
+    dl->AddText(ImVec2(hx + 10.0f * scale, top + 38.0f * scale), palette_.mutedText,
+                (str(static_cast<int>(pass.notes.size())) + " notes, from the keyboard").c_str());
+    dl->PopClipRect();
 }
 
 void CompView::drawTakeHeader(ApiClient& client, const State& state, const Take& take,

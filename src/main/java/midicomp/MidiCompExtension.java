@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -130,6 +131,14 @@ public class MidiCompExtension extends ControllerExtension
    /** When the current recording started and ended (``System.nanoTime()``), 0 if not yet. */
    private long recordingSince;
    private long recordingUntil;
+   /** Provisional takes from the keyboard notes, shown while recording; pass to notes. */
+   private List<StateJson.PreviewPass> preview = List.of();
+   /** Whether :member:`preview` follows the current recording (until its takes are assembled). */
+   private boolean previewActive;
+   private long previewAt;
+   /** Clip-local beat of the loop start in played time, from the last assembly. */
+   private double previewOffsetBeats;
+   private static final long PREVIEW_INTERVAL_NANOS = 250_000_000L;
    /** The current recording was started to record a single pass. */
    private boolean recordingOnePass;
    /** A final pass shorter than this part of the loop is not a take (stopped just after a wrap). */
@@ -350,6 +359,7 @@ public class MidiCompExtension extends ControllerExtension
 
       tickPendingStart();
       tickSession();
+      updatePreview();
 
       if (stateDirty && server != null)
       {
@@ -375,7 +385,9 @@ public class MidiCompExtension extends ControllerExtension
             compLongerThanClip(), sessionAvailable() ? clipSteps(sessionClip()) : -1,
             capture.passes(),
             capture.isSinglePass(),
-            isRecording() ? playedWraps + 1 : 0);
+            isRecording() ? playedWraps + 1 : 0,
+            capture.isPending() && !sessionAvailable(),
+            preview);
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
          session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
@@ -936,6 +948,9 @@ public class MidiCompExtension extends ControllerExtension
          recordingSince = now;
          recordingUntil = 0;
          playedWraps = 0;
+         previewActive = live.link() != null && live.link().source() == Take.Source.ARRANGER;
+         preview = List.of();
+         previewAt = 0;
          timeline.start(now + LoopCapture.START_GUARD_MILLIS * 1_000_000L);
       }
       if (transportRecording())
@@ -965,6 +980,7 @@ public class MidiCompExtension extends ControllerExtension
       {
          log("No keyboard notes arrived from the companion (is a MIDI input selected there?), "
             + "so the recording is one take");
+         endPreview();
          return recorded.isEmpty() ? List.of() : List.of(recorded);
       }
 
@@ -995,7 +1011,53 @@ public class MidiCompExtension extends ControllerExtension
          result.maxDeviationBeats() * msPerBeat,
          (result.offsetBeats() - Math.round(result.offsetBeats() * 4) / 4.0) * msPerBeat,
          timeline.sampleCount(), keyboard.clockOffset() / 1e6));
+      if (result.matched() > 0)
+         previewOffsetBeats = result.offsetBeats();
+      endPreview();
       return result.passes();
+   }
+
+   /**
+    * Recomputes the provisional takes from the keyboard notes, a few times per second while a
+    * recording runs and until its takes are assembled. Positions use the offset of the last
+    * assembly (the loop start in the clip and the timing delay), or none for the first one.
+    */
+   private void updatePreview()
+   {
+      final long now = System.nanoTime();
+      if (!previewActive || now - previewAt < PREVIEW_INTERVAL_NANOS)
+         return;
+      previewAt = now;
+      final double tempo = transport.tempo().value().getRaw();
+      final double loopBeats = transport.arrangerLoopDuration().get();
+      final long until = recordingUntil != 0 ? recordingUntil + RECORDING_MARGIN_NANOS : now;
+      final TreeMap<Integer, List<NoteData>> byPass = new TreeMap<>();
+      for (final KeyboardEvents.PlayedNote p : keyboard.notes(recordingSince, until, timeline,
+         transport.arrangerLoopStart().get(), loopBeats, tempo))
+      {
+         if (recordingOnePass && p.pass() > 0)
+            continue;
+         final NoteData note = LoopTakes.rebuild(p, previewOffsetBeats, stepSize, null);
+         if (note != null)
+            byPass.computeIfAbsent(p.pass(), k -> new ArrayList<>()).add(note);
+      }
+      final List<StateJson.PreviewPass> next = new ArrayList<>();
+      byPass.forEach((pass, notes) -> next.add(new StateJson.PreviewPass(pass + 1, notes)));
+      if (!next.equals(preview))
+      {
+         preview = List.copyOf(next);
+         markDirty();
+      }
+   }
+
+   private void endPreview()
+   {
+      previewActive = false;
+      if (!preview.isEmpty())
+      {
+         preview = List.of();
+         markDirty();
+      }
    }
 
    /**

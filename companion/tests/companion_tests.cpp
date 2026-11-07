@@ -245,6 +245,21 @@ void testCompStore() {
     CHECK(fileComponent("") == "untitled");
 }
 
+void testPreview() {
+    const State s = parseState(R"json({"v":3,"stepsPerBeat":128,"barSteps":512,"length":1024,
+        "project":"P","launcherSel":null,"arrangerSel":null,"canUndoEdit":false,
+        "canRevert":false,"message":"","log":[],
+        "session":{"source":"arranger","label":"Keys (arranger)","available":false,
+                   "recording":false,"pending":false,"truncated":false,"clipLength":-1,
+                   "passes":2,"singlePass":false,"recordingPass":0,"collecting":true,
+                   "track":"Keys","preview":[{"pass":3,"notes":[[10,40,64,0.5,0,-1]]}]},
+        "takes":[],"segments":[],"comp":[]})json");
+    CHECK(s.session && s.session->collecting && s.session->track == "Keys");
+    CHECK(s.preview().size() == 1 && s.preview()[0].pass == 3);
+    CHECK(s.preview()[0].notes.size() == 1 && s.preview()[0].notes[0].key == 40);
+    CHECK(s.keyRange().first <= 40);  // provisional notes count for the key range
+}
+
 void testMidi() {
     // The message delivered with the least delay sets the anchor; earlier ones are corrected.
     TimestampAnchor anchor;
@@ -292,6 +307,7 @@ int main() {
         {"palette", testPalette},
         {"compStore", testCompStore},
         {"midi", testMidi},
+        {"preview", testPreview},
     };
     for (const auto& [name, test] : tests) {
         const int before = failures;

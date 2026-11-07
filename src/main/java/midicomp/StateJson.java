@@ -17,6 +17,17 @@ final class StateJson
    }
 
    /**
+    * Provisional notes of a loop pass being recorded.
+    *
+    * Args:
+    *    pass: pass number, from 1.
+    *    notes: the notes, in grid coordinates.
+    */
+   record PreviewPass(int pass, List<NoteData> notes)
+   {
+   }
+
+   /**
     * Status of the comp session.
     *
     * Args:
@@ -29,6 +40,8 @@ final class StateJson
     *    passes: loop passes recorded in this session.
     *    singlePass: whether recording stops at the end of the current pass.
     *    recordingPass: the loop pass being recorded (1-based), or 0 when not recording.
+    *    collecting: whether a recording waits for the clip to be selected to become takes.
+    *    preview: provisional takes of the current recording, from the keyboard notes.
     */
    record SessionStatus(
       ClipRef clip,
@@ -39,7 +52,9 @@ final class StateJson
       int clipLength,
       int passes,
       boolean singlePass,
-      int recordingPass)
+      int recordingPass,
+      boolean collecting,
+      List<PreviewPass> preview)
    {
    }
 
@@ -108,7 +123,20 @@ final class StateJson
             .append(",\"passes\":").append(session.passes())
             .append(",\"singlePass\":").append(session.singlePass())
             .append(",\"recordingPass\":").append(session.recordingPass())
-            .append('}');
+            .append(",\"collecting\":").append(session.collecting())
+            .append(",\"track\":").append(Json.quote(session.clip().trackName()))
+            .append(",\"preview\":[");
+      if (session != null)
+      {
+         for (int i = 0; i < session.preview().size(); i++)
+         {
+            final PreviewPass p = session.preview().get(i);
+            sb.append(i > 0 ? "," : "").append("{\"pass\":").append(p.pass()).append(",\"notes\":[");
+            appendNotes(sb, p.notes(), stepSize);
+            sb.append("]}");
+         }
+         sb.append("]}");
+      }
 
       sb.append(",\"takes\":[");
       final List<Take> takes = model.takes();

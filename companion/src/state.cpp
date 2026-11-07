@@ -45,15 +45,24 @@ int State::takeIndex(const int id) const {
     return it == takes.end() ? -1 : static_cast<int>(it - takes.begin());
 }
 
+const std::vector<PreviewPass>& State::preview() const {
+    static const std::vector<PreviewPass> none;
+    return session ? session->preview : none;
+}
+
 std::pair<int, int> State::keyRange() const {
     int low = 127;
     int high = 0;
-    for (const auto& take : takes) {
-        for (const auto& note : take.notes) {
+    const auto include = [&](const std::vector<Note>& notes) {
+        for (const auto& note : notes) {
             low = std::min(low, note.key);
             high = std::max(high, note.key);
         }
-    }
+    };
+    for (const auto& take : takes)
+        include(take.notes);
+    for (const auto& pass : preview())
+        include(pass.notes);
     if (low > high) {
         low = 60;
         high = 72;
@@ -94,7 +103,14 @@ State parseState(const std::string_view text) {
             .passes = it->at("passes").get<int>(),
             .singlePass = it->value("singlePass", false),
             .recordingPass = it->value("recordingPass", 0),
+            .collecting = it->value("collecting", false),
+            .track = it->value("track", std::string{}),
+            .preview = {},
         };
+        if (const auto preview = it->find("preview"); preview != it->end())
+            for (const auto& p : *preview)
+                s.session->preview.push_back(PreviewPass{.pass = p.at("pass").get<int>(),
+                                                         .notes = parseNotes(p.at("notes"))});
     }
 
     const auto& takes = j.at("takes");

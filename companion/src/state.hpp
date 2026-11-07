@@ -33,6 +33,12 @@ struct Segment {
     int take = 0;
 };
 
+/** Provisional notes of a loop pass being recorded, from the keyboard. */
+struct PreviewPass {
+    int pass = 0;  ///< Pass number, from 1.
+    std::vector<Note> notes;
+};
+
 /** The comp session: the clip being comped and its sync state. */
 struct Session {
     std::string source;  ///< ``"launcher"`` or ``"arranger"``.
@@ -45,6 +51,9 @@ struct Session {
     int passes = 0;           ///< Loop passes recorded in this session.
     bool singlePass = false;  ///< Recording stops at the end of the current pass.
     int recordingPass = 0;    ///< Loop pass being recorded (1-based), 0 when not recording.
+    bool collecting = false;  ///< A recording waits for the clip to be selected.
+    std::string track;        ///< Name of the comp clip's track.
+    std::vector<PreviewPass> preview;  ///< Provisional takes of the current recording.
 };
 
 /** Snapshot of the extension state, see ``API.md``. */
@@ -71,8 +80,12 @@ struct State {
     /** Returns the index of take ``id`` in :member:`takes`, or ``-1``. */
     [[nodiscard]] int takeIndex(int id) const;
 
+    /** Returns the provisional takes of the current recording, or an empty list. */
+    [[nodiscard]] const std::vector<PreviewPass>& preview() const;
+
     /**
-     * Returns the lowest and highest key over all takes as ``(low, high)``.
+     * Returns the lowest and highest key over all takes and provisional takes as
+     * ``(low, high)``.
      *
      * The range spans at least one octave so that sparse takes stay readable.
      */

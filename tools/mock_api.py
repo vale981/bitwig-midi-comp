@@ -1,9 +1,11 @@
 """Minimal stand-in for the extension's HTTP API with sample data, for UI screenshots.
 
-Usage: python3 tools/mock_api.py PORT ENDPOINT_FILE [start|record|session]
+Usage: python3 tools/mock_api.py PORT ENDPOINT_FILE [start|record|session|recording|select]
 
 ``start`` serves the state before a comp session (a clip selected in Bitwig), ``record`` a session
-before the first pass, and ``session`` (the default) a session with six recorded passes.
+before the first pass, ``session`` (the default) a session with six recorded passes,
+``recording`` the same while two more passes are being recorded, and ``select`` the session
+waiting for a clip to be selected in Bitwig.
 """
 import json
 import random
@@ -48,7 +50,7 @@ elif mode == "record":
                          "recording": False, "overdub": True, "pending": False,
                          "truncated": False, "passes": 0},
              "takes": [], "segments": [], "comp": []}
-else:
+else:  # session, recording, select
     state = {"v": 1, "project": "Demo song", "stepsPerBeat": SPB, "barSteps": BAR, "length": LENGTH,
              "launcherSel": None, "arrangerSel": "Keys (arranger)", "canUndoEdit": True,
              "canRevert": True, "message": "Take 4: 3.1 to 5.1",
@@ -56,6 +58,15 @@ else:
                          "recording": False, "overdub": True, "pending": False,
                          "truncated": False, "passes": 6},
              "takes": takes, "segments": segments, "comp": comp}
+if mode in ("recording", "select"):
+    session = state["session"]
+    session["track"] = "Keys"
+    session["preview"] = [{"pass": 7, "notes": take_notes(7, 60)},
+                          {"pass": 8, "notes": [n for n in take_notes(8, 62) if n[0] < 2600]}]
+    if mode == "recording":
+        session.update(recording=True, available=False, recordingPass=8)
+    else:
+        session.update(available=False, collecting=True)
 body = json.dumps(state).encode()
 
 

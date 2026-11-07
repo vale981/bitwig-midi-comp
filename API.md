@@ -78,7 +78,12 @@ State document:
     "clipLength": 2048,             // clip length in steps, -1 while it is not under its cursor
     "passes": 3,                    // loop passes recorded in this session
     "singlePass": false,            // recording stops at the end of the current pass
-    "recordingPass": 0              // loop pass being recorded (1-based), 0 when not recording
+    "recordingPass": 0,             // loop pass being recorded (1-based), 0 when not recording
+    "collecting": false,            // a recording waits for a clip on the track to be selected
+    "track": "Keys",                // the comp clip's track
+    "preview": [                    // provisional takes while recording (arranger), from the
+      {"pass": 1, "notes": [...]}   // keyboard notes; replaced by the takes once assembled
+    ]
   },
   "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [

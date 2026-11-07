@@ -40,7 +40,9 @@ Two parts:
      the matched notes and removed, also when deciding which pass a note just before or after
      the loop start belongs to. *Log* reports the remaining deviation in milliseconds.
 
-   Without a keyboard selected, the recording becomes a single take. Bitwig and the companion
+   While recording, the passes appear as provisional lanes (red notes, from the keyboard), and
+   are replaced by the assembled takes when recording ends. Without a keyboard selected, the
+   recording becomes a single take. Bitwig and the companion
    both need the keyboard (see *Sharing the keyboard* below). *Log* shows what the extension saw
    (recording, loop wraps, assembled takes).
 
@@ -70,8 +72,10 @@ exposes); the companion only displays a reduced form.
 
 **Selection (arranger).** Bitwig only lets extensions read and write the *selected* arranger
 clip, and arranger clips cannot be pinned. Any clip on the comp clip's track counts, so selecting
-something on another track pauses writing ("Changes waiting") until a clip on that track is
-selected again. Launcher clips are pinned by the session and have no such limit.
+something on another track pauses writing until a clip on that track is selected again. Bitwig
+also deselects the clip when recording, so after each recording a click on a clip of the track is
+needed to turn it into takes. While a click is needed, the companion grays out the lanes and
+says which track to click. Launcher clips are pinned by the session and have no such limit.
 
 **Saved comps.** The companion saves the current comp shortly after every change, one file per
 session, keeping the ten newest per clip. When you comp a clip with a saved comp in the same
