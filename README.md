@@ -37,14 +37,15 @@ Two parts:
      timestamps, velocities and length from the MIDI messages, other attributes copied from a
      recorded note.
    - The constant delay between the keyboard timestamps and Bitwig's recording is measured on
-     the matched notes and removed, also when deciding which pass a note just before or after
-     the loop start belongs to. *Log* reports the remaining deviation in milliseconds.
+     the matched notes and removed before notes are assigned to passes, so a note played just
+     before or after the loop start lands in the right pass. *Log* reports the remaining
+     deviation in milliseconds.
 
    While recording, the passes appear as provisional lanes (red notes, from the keyboard), and
    are replaced by the assembled takes when recording ends. Without a keyboard selected, the
-   recording becomes a single take. Bitwig and the companion
-   both need the keyboard (see *Sharing the keyboard* below). *Log* shows what the extension saw
-   (recording, loop wraps, assembled takes).
+   recording becomes a single take. Bitwig and the companion both need the keyboard (see
+   *Sharing the keyboard* below). *Log* shows what the extension saw (recording, loop wraps,
+   assembled takes).
 
    ![Waiting for the first pass](docs/screenshots/record.png)
 
@@ -74,7 +75,7 @@ exposes); the companion only displays a reduced form.
 clip, and arranger clips cannot be pinned. Any clip on the comp clip's track counts, so selecting
 something on another track pauses writing until a clip on that track is selected again. Bitwig
 also deselects the clip when recording, so after each recording a click on a clip of the track is
-needed to turn it into takes. While a click is needed, the companion grays out the lanes and
+needed to turn the recording into takes. While a click is needed, the companion grays out the lanes and
 says which track to click. Launcher clips are pinned by the session and have no such limit.
 
 **Saved comps.** The companion saves the current comp shortly after every change, one file per
