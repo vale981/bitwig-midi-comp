@@ -37,12 +37,13 @@ struct Segment {
 struct Session {
     std::string source;  ///< ``"launcher"`` or ``"arranger"``.
     std::string label;
-    bool available = false;  ///< The clip is under its cursor (arranger clips must be selected).
-    bool recording = false;  ///< Bitwig is recording into the clip.
-    bool overdub = true;     ///< Overdub is on; without it Bitwig records into a new clip.
-    bool pending = false;    ///< Comp changes wait to be written.
-    bool truncated = false;  ///< The comp is longer than the clip.
-    int passes = 0;          ///< Loop passes recorded in this session.
+    bool available = false;   ///< The clip is under its cursor (arranger clips must be selected).
+    bool recording = false;   ///< Bitwig is recording into the clip.
+    bool overdub = true;      ///< Overdub is on; without it Bitwig records into a new clip.
+    bool pending = false;     ///< Comp changes wait to be written.
+    bool truncated = false;   ///< The comp is longer than the clip.
+    int passes = 0;           ///< Loop passes recorded in this session.
+    bool singlePass = false;  ///< Recording stops at the end of the current pass.
 };
 
 /** Snapshot of the extension state, see ``API.md``. */
@@ -57,6 +58,7 @@ struct State {
     bool canRevert = false;
     std::string message;
     std::optional<Session> session;
+    std::vector<std::string> log;  ///< Recent extension events, oldest first.
     std::vector<Take> takes;
     std::vector<Segment> segments;
     std::vector<Note> comp;

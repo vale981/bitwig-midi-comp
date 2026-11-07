@@ -93,7 +93,11 @@ class CompView {
     [[nodiscard]] int gridSteps(const State& state) const;
     void commitRange(ApiClient& client, const State& state, int lane, int a, int b) const;
 
+    void drawLog(const State& state);
+
     Palette palette_;
+    bool stopAtLoopEnd_ = true;
+    bool showLog_ = false;
     Snap snap_ = Snap::Bar;
     float pxPerBar_ = 160.0f;
     std::optional<Drag> drag_;

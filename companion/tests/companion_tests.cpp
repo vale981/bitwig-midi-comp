@@ -48,7 +48,8 @@ constexpr const char* kState = R"({"v":7,"stepsPerBeat":128,"barSteps":512,"leng
 "launcherSel":"Keys / Take 1","arrangerSel":null,"canUndoEdit":true,
 "canRevert":false,"message":"ok",
 "session":{"source":"launcher","label":"Keys / Comp","available":true,"recording":false,
-"overdub":false,"pending":true,"truncated":false,"passes":2},
+"overdub":false,"pending":true,"truncated":false,"passes":2,"singlePass":true},
+"log":["12:00:00  Recording started"],
 "takes":[{"id":1,"name":"Keys / Take 1","source":"launcher","length":1024,
 "notes":[[0,60,64,0.8,0,-1],[512,67,32.5,0.5,1,-1]]}],
 "segments":[[0,1024,1]],"comp":[[0,60,64,0.8,0,1]]})";
@@ -61,7 +62,8 @@ void testParseState() {
     CHECK(!s.arrangerSel.has_value());
     CHECK(s.canUndoEdit && !s.canRevert);
     CHECK(s.session.has_value() && s.session->pending && s.session->label == "Keys / Comp");
-    CHECK(!s.session->overdub && s.session->passes == 2);
+    CHECK(!s.session->overdub && s.session->passes == 2 && s.session->singlePass);
+    CHECK(s.log.size() == 1 && s.log[0].ends_with("Recording started"));
     CHECK(s.takes.size() == 1 && s.takes[0].notes.size() == 2);
     CHECK(s.takes[0].notes[1].muted && s.takes[0].notes[1].duration == 32.5);
     CHECK(s.segments.size() == 1 && s.segments[0].to == 1024 && s.segments[0].take == 1);

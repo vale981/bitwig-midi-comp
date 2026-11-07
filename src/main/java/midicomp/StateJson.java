@@ -27,6 +27,7 @@ final class StateJson
     *    pending: whether comp changes wait to be written.
     *    truncated: whether the comp is longer than the clip.
     *    passes: loop passes recorded in this session.
+    *    singlePass: whether recording stops at the end of the current pass.
     */
    record SessionStatus(
       ClipRef clip,
@@ -35,7 +36,8 @@ final class StateJson
       boolean overdub,
       boolean pending,
       boolean truncated,
-      int passes)
+      int passes,
+      boolean singlePass)
    {
    }
 
@@ -55,6 +57,7 @@ final class StateJson
     *    session: comp session status, or ``null`` without a session.
     *    canRevert: whether the session clip's original content can be restored.
     *    message: last status message.
+    *    log: recent diagnostic events, oldest first.
     *
     * Returns:
     *    The JSON text.
@@ -67,7 +70,8 @@ final class StateJson
       final Selection selection,
       final SessionStatus session,
       final boolean canRevert,
-      final String message)
+      final String message,
+      final List<String> log)
    {
       final StringBuilder sb = new StringBuilder(4096);
       sb.append("{\"v\":").append(version)
@@ -79,6 +83,11 @@ final class StateJson
          .append(",\"canUndoEdit\":").append(model.canUndo())
          .append(",\"canRevert\":").append(canRevert)
          .append(",\"message\":").append(Json.quote(message));
+
+      sb.append(",\"log\":[");
+      for (int i = 0; i < log.size(); i++)
+         sb.append(i > 0 ? "," : "").append(Json.quote(log.get(i)));
+      sb.append(']');
 
       sb.append(",\"session\":");
       if (session == null)
@@ -92,6 +101,7 @@ final class StateJson
             .append(",\"pending\":").append(session.pending())
             .append(",\"truncated\":").append(session.truncated())
             .append(",\"passes\":").append(session.passes())
+            .append(",\"singlePass\":").append(session.singlePass())
             .append('}');
 
       sb.append(",\"takes\":[");

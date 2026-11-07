@@ -96,9 +96,13 @@ public class MidiCompExtension extends ControllerExtension
 
    private final CompModel model = new CompModel();
    private final LiveSync live = new LiveSync();
-   private final LoopCapture capture = new LoopCapture();
+   private final LoopCapture capture = new LoopCapture(this::log);
+   /** Recent capture and session events, for diagnostics in the companion. */
+   private final Deque<String> eventLog = new ArrayDeque<>();
+   private static final int EVENT_LOG_SIZE = 40;
    private final Deque<HistoryEntry> history = new ArrayDeque<>();
    private double stepSize = RESOLUTION_STEPS[1];
+   private boolean wasRecording;
    /** The user's overdub setting before the session enabled it, restored when the session ends. */
    private boolean overdubBefore;
 
@@ -129,6 +133,9 @@ public class MidiCompExtension extends ControllerExtension
       transport.playPosition().markInterested();
       transport.isPlaying().addValueObserver(v -> markDirty());
       transport.isArrangerRecordEnabled().addValueObserver(v -> markDirty());
+      transport.isArrangerLoopEnabled().markInterested();
+      transport.arrangerLoopStart().markInterested();
+      transport.playStartPosition().markInterested();
       transport.isArrangerOverdubEnabled().addValueObserver(v -> markDirty());
       transport.isClipLauncherOverdubEnabled().addValueObserver(v -> markDirty());
 
@@ -308,10 +315,11 @@ public class MidiCompExtension extends ControllerExtension
       if (live.link() != null)
          session = new StateJson.SessionStatus(live.link(), sessionAvailable(), isRecording(),
             overdubSetting(live.link().source()).get(), live.isPending(),
-            clipSteps(sessionClip()) < model.length(), capture.passes());
+            clipSteps(sessionClip()) < model.length(), capture.passes(),
+            capture.isSinglePass());
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), selection, session,
-         !history.isEmpty(), lastMessage);
+         !history.isEmpty(), lastMessage, List.copyOf(eventLog));
    }
 
    private void markDirty()
@@ -332,6 +340,8 @@ public class MidiCompExtension extends ControllerExtension
          case "undoEdit" -> model.undo() ? Result.ok("Edit undone") : Result.fail("Nothing to undo");
          case "start" -> startSession(p.getOrDefault("source", ""));
          case "end" -> endSession();
+         case "record" -> startRecording(!"false".equals(p.get("stopAtEnd")));
+         case "stopRecording" -> stopRecording();
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -554,6 +564,7 @@ public class MidiCompExtension extends ControllerExtension
       overdubSetting(ref.source()).set(true);
       live.link(ref, content);
       capture.start();
+      log("Comping " + ref.label() + " (" + content.size() + " notes)");
       return Result.ok("Comping " + ref.label() + ". Record into it with the loop on; each pass "
          + "becomes a take.");
    }
@@ -613,13 +624,17 @@ public class MidiCompExtension extends ControllerExtension
       final EditableClip clip = sessionClip();
       final boolean available = sessionAvailable();
       final boolean recording = isRecording();
-      final int margin = Math.max(1, (int) Math.round(0.125 / stepSize));
+      if (recording != wasRecording)
+      {
+         wasRecording = recording;
+         markDirty();
+      }
 
-      final List<NoteData> pass = capture.tick(clip, available, recording, live.expected(),
-         transport.playPosition().get(), clip.clip().playingStep().get(), margin,
-         System.nanoTime());
-      if (pass != null)
+      for (final List<NoteData> pass : capture.tick(clip, available, recording, live.expected(),
+         transport.playPosition().get(), clip.clip().playingStep().get(), System.nanoTime()))
          addPass(clip, pass);
+      if (capture.takeStopRequest())
+         stopTransportRecording();
 
       if (recording || capture.isPending())
       {
@@ -649,6 +664,70 @@ public class MidiCompExtension extends ControllerExtension
       live.markDirty();
       lastMessage = String.format("Recorded pass %d as take %d (%d notes)", capture.passes(),
          take.id(), pass.size());
+      markDirty();
+   }
+
+   /**
+    * Records over the arranger loop region into the session clip.
+    *
+    * Args:
+    *    stopAtEnd: stop when the loop wraps (one take); otherwise every repetition becomes a take
+    *       until recording is stopped.
+    */
+   private Result startRecording(final boolean stopAtEnd)
+   {
+      if (live.link() == null)
+         return Result.fail("Start comping a clip first");
+      if (live.link().source() != Take.Source.ARRANGER)
+         return Result.fail("Recording from the companion works for arranger clips; record "
+            + "launcher clips in Bitwig");
+      if (isRecording())
+         return Result.fail("Already recording");
+      if (!sessionAvailable())
+         return Result.fail("Select " + live.link().label() + " in the arranger first");
+
+      final double loopStart = transport.arrangerLoopStart().get();
+      transport.isArrangerLoopEnabled().set(true);
+      transport.isArrangerOverdubEnabled().set(true);
+      transport.playStartPosition().set(loopStart);
+      transport.setPosition(loopStart);
+      transport.isArrangerRecordEnabled().set(true);
+      if (stopAtEnd)
+         capture.armSinglePass();
+      transport.play();
+      log(stopAtEnd ? "Recording one pass of the loop" : "Recording until stopped");
+      return Result.ok(stopAtEnd
+         ? "Recording one pass of the loop region"
+         : "Recording; every repetition of the loop becomes a take");
+   }
+
+   private Result stopRecording()
+   {
+      if (!transport.isPlaying().get())
+         return Result.fail("Not recording");
+      stopTransportRecording();
+      return Result.ok("Recording stopped");
+   }
+
+   private void stopTransportRecording()
+   {
+      transport.stop();
+      transport.isArrangerRecordEnabled().set(false);
+      markDirty();
+   }
+
+   /**
+    * Records a diagnostic event: printed to the controller console and kept for the companion.
+    *
+    * Args:
+    *    message: the event.
+    */
+   private void log(final String message)
+   {
+      host.println(message);
+      eventLog.addLast(String.format("%tT  %s", System.currentTimeMillis(), message));
+      while (eventLog.size() > EVENT_LOG_SIZE)
+         eventLog.removeFirst();
       markDirty();
    }
 

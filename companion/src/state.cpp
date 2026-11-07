@@ -91,6 +91,7 @@ State parseState(const std::string_view text) {
             .pending = it->at("pending").get<bool>(),
             .truncated = it->at("truncated").get<bool>(),
             .passes = it->at("passes").get<int>(),
+            .singlePass = it->value("singlePass", false),
         };
     }
 
@@ -117,6 +118,8 @@ State parseState(const std::string_view text) {
     }
 
     s.comp = parseNotes(j.at("comp"));
+    if (const auto it = j.find("log"); it != j.end() && it->is_array())
+        s.log = it->get<std::vector<std::string>>();
     return s;
 }
 

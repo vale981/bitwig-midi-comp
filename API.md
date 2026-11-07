@@ -74,8 +74,10 @@ State document:
     "overdub": true,                // overdub is on; without it Bitwig records into a new clip
     "pending": false,               // comp changes wait to be written
     "truncated": false,             // the comp is longer than the clip
-    "passes": 3                     // loop passes recorded in this session
+    "passes": 3,                    // loop passes recorded in this session
+    "singlePass": false             // recording stops at the end of the current pass
   },
+  "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [
     {"id": 1, "name": "Pass 1", "source": "arranger", "length": 2048,
      "notes": [[x, key, durationSteps, velocity, muted, -1], ...]}
@@ -98,6 +100,8 @@ Bitwig did not process the command within 5 s.
 |--------------|-----------------------------|--------|
 | `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. |
 | `end`        |                             | End the session; the clip keeps the comp. |
+| `record`     | `stopAtEnd=true\|false`     | Arranger sessions: record over the loop region from its start. With `stopAtEnd` (default) recording stops when the loop wraps and the pass becomes one take; otherwise every repetition becomes a take until `stopRecording`. |
+| `stopRecording` |                          | Stop the transport and arranger recording. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
 | `addTake`    | `source=launcher\|arranger` | Copy the selected clip's notes as a new take. |
 | `removeTake` | `take`                      | Remove a take and its segments. |
@@ -117,4 +121,9 @@ Bitwig did not process the command within 5 s.
   for 150 ms before it writes.
 - While Bitwig records into the clip nothing is written. Each wrap of the loop (transport jump,
   or the clip's playing step jumping back for launcher clips) and the end of recording close a
-  pass; its new notes become a take. Afterwards the comp is written over the recording.
+  pass. New notes are assigned to passes by when they appeared in the clip; a note reported just
+  after a wrap but lying in the second half of the loop still belongs to the pass before. Passes
+  are collected once the clip is under its cursor, so the comp clip should stay selected while
+  recording in the arranger. Afterwards the comp is written over the recording.
+- `log` lists recent capture events (recording start and stop, wraps, collected passes); the
+  same lines go to Bitwig's controller console.

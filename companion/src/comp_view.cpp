@@ -29,6 +29,8 @@ void CompView::draw(ApiClient& client) {
 
     drawToolbar(client, state);
     ImGui::Separator();
+    if (state != nullptr && showLog_)
+        drawLog(*state);
 
     if (state == nullptr) {
         ImGui::TextDisabled("%s", client.connectionDetail().c_str());
@@ -70,6 +72,39 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
+        const Session& session = *state->session;
+        if (session.recording) {
+            if (ImGui::Button("Stop"))
+                client.send("stopRecording");
+            ImGui::SetItemTooltip(session.singlePass ? "Recording stops at the end of the loop"
+                                                     : "Stop recording");
+        } else {
+            const bool arranger = session.source == "arranger";
+            ImGui::BeginDisabled(!arranger);
+            const auto red = ImGui::ColorConvertU32ToFloat4(palette_.error);
+            ImGui::PushStyleColor(ImGuiCol_Button, red);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                  ImGui::ColorConvertU32ToFloat4(darken(palette_.error, 0.1f)));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                                  ImGui::ColorConvertU32ToFloat4(darken(palette_.error, 0.2f)));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(palette_.windowBg));
+            if (ImGui::Button("Record"))
+                client.send("record", {{"stopAtEnd", stopAtLoopEnd_ ? "true" : "false"}});
+            ImGui::PopStyleColor(4);
+            ImGui::SetItemTooltip(
+                "%s", arranger ? "Record over the arranger loop region into the comp clip"
+                               : "For launcher clips, record in Bitwig; each loop "
+                                 "pass becomes a take");
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::Checkbox("Stop at loop end", &stopAtLoopEnd_);
+            ImGui::SetItemTooltip("On: record one take and stop.\nOff: every repetition of the "
+                                  "loop becomes a take until you stop.");
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+
         if (ImGui::Button("Add take..."))
             ImGui::OpenPopup("addTake");
         ImGui::SetItemTooltip("Copy the notes of a clip recorded elsewhere as a new take");
@@ -95,6 +130,10 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
             client.send("end");
         ImGui::SetItemTooltip("Finish comping; the clip keeps the comp");
     }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(showLog_ ? "Hide log" : "Log"))
+        showLog_ = !showLog_;
+    ImGui::SetItemTooltip("Recent extension events (recording, loop passes)");
 
     // Second row: editing controls (only useful while comping) and the last message.
     const bool comping = state != nullptr && state->session.has_value();
@@ -297,8 +336,11 @@ void CompView::drawRecordHint(const State& state) {
         y += centered(y, fontSize * 1.6f, palette_.text, "Record into " + session.label) +
              6.0f * scale;
         y += centered(y, fontSize, palette_.mutedText,
-                      "Set the loop over the clip, arm the track and record. Each pass becomes "
-                      "a take.") +
+                      session.source == "arranger"
+                          ? "Set the loop region over the clip and press Record. Each pass "
+                            "becomes a take."
+                          : "Record into the clip in Bitwig with the loop on. Each pass becomes "
+                            "a take.") +
              4.0f * scale;
         y += centered(y, fontSize, palette_.mutedText,
                       "Takes recorded elsewhere can be added with \"Add take\".") +
@@ -738,6 +780,21 @@ void CompView::commitRange(ApiClient& client, const State& state, const int lane
     else
         client.send("assign",
                     {{"take", str(lane)}, {"from", str(range->first)}, {"to", str(range->second)}});
+}
+
+void CompView::drawLog(const State& state) {
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    ImGui::SetNextWindowSize(ImVec2(520.0f * scale, 260.0f * scale), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Extension log", &showLog_)) {
+        if (state.log.empty())
+            ImGui::TextDisabled("No events yet. Start comping and record to see what happens.");
+        for (const auto& line : state.log)
+            ImGui::TextUnformatted(line.c_str());
+        // Follow new lines unless the user scrolled up.
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f)
+            ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::End();
 }
 
 }  // namespace midicomp
