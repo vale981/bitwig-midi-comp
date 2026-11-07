@@ -18,6 +18,7 @@ struct SavedComp {
     std::string session;  ///< Identifier of the session that saved it.
     int takes = 0;
     std::int64_t savedAt = 0;  ///< Seconds since the Unix epoch.
+    std::string fingerprint;   ///< Fingerprint of the comp's notes, see the extension's API.
 };
 
 /**
@@ -75,6 +76,21 @@ class CompStore {
     [[nodiscard]] std::optional<SavedComp> newestFor(std::string_view project,
                                                      std::string_view clip,
                                                      std::string_view excludeSession) const;
+
+    /**
+     * Returns the comp to offer for a session: the newest comp saved for the clip (by title),
+     * else the newest comp of the project whose notes the clip holds (same fingerprint: a
+     * renamed clip, or a copy of an arranger clip, whose titles the API does not expose).
+     *
+     * Args:
+     *     project: project name.
+     *     clip: clip label.
+     *     fingerprint: fingerprint of the clip's content; empty matches nothing.
+     *     excludeSession: the current session, whose own saves are not offered.
+     */
+    [[nodiscard]] std::optional<SavedComp> offerFor(std::string_view project, std::string_view clip,
+                                                    std::string_view fingerprint,
+                                                    std::string_view excludeSession) const;
 
     /**
      * Returns the export document of a saved comp, for ``POST /api/v1/import``.

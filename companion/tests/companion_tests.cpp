@@ -241,6 +241,18 @@ void testCompStore() {
         pads += comp.clip == "Pad" ? 1 : 0;
     CHECK(pads == static_cast<int>(CompStore::kKeepPerClip));
 
+    // A copy of a clip is recognized by the fingerprint of the comp it holds.
+    store.save("v1", R"({"format":1,"project":"Song","clip":"Keys / Take A","fingerprint":"abc",
+                         "takes":[{},{}],"segments":[]})",
+               5000);
+    const auto copy = store.offerFor("Song", "Keys / Take A copy", "abc", "v2");
+    CHECK(copy.has_value() && copy->session == "v1" && copy->fingerprint == "abc");
+    CHECK(!store.offerFor("Song", "Drums", "", "v2").has_value());
+    CHECK(store.offerFor("Song", "Bass", "", "v2")->session == "s3");  // by clip, as before
+    // The title comes first, even when another clip's comp has the same fingerprint.
+    CHECK(store.offerFor("Song", "Bass", "abc", "v2")->session == "s3");
+    CHECK(!store.offerFor("Song", "Keys / Take A copy", "abc", "v1").has_value());
+
     CHECK(fileComponent("Keys / Take 1 (ä)") == "Keys___Take_1_____");  // ä is two bytes
     CHECK(fileComponent("") == "untitled");
 }

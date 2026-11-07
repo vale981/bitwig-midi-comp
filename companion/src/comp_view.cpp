@@ -231,6 +231,25 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::SetItemTooltip("Restore the clip as it was before comping and finish");
         ImGui::EndDisabled();
         ImGui::SameLine();
+        if (versionSaved_.exchange(false))
+            client.send("newVersion");
+        ImGui::BeginDisabled(session.recording || versionRequested_);
+        if (ImGui::Button("New version")) {
+            // Save the comp first, so the copy can also be continued by hand.
+            versionRequested_ = true;
+            client.fetch("export", [this, id = sessionId_](std::optional<std::string> doc) {
+                if (doc && store_ != nullptr && store_->save(id, *doc, unixNow()))
+                    storeChanged_ = true;
+                versionSaved_ = true;
+            });
+        }
+        ImGui::SetItemTooltip(
+            "Duplicate the clip in Bitwig and continue comping the copy with the same takes "
+            "and cuts.\nThe original keeps its comp. Arranger copies stay on the same track, "
+            "where the extension\ncannot tell them apart: while comping, select only the "
+            "copy.");
+        ImGui::EndDisabled();
+        ImGui::SameLine();
         if (ImGui::Button("Done"))
             client.send("end");
         ImGui::SetItemTooltip("Finish comping; the clip keeps the comp");
@@ -1125,7 +1144,11 @@ void CompView::updateStore(ApiClient& client, const State* state) {
         sessionId_ = sessionStamp();
         savedVersion_ = -1;
         lastVersion_ = -1;
-        restoreOffer_ = store_->newestFor(state->project, state->session->label, sessionId_);
+        restoreClip_ = state->session->label;
+        restoreOffer_ = versionRequested_.exchange(false)
+                            ? std::nullopt
+                            : store_->offerFor(state->project, state->session->label,
+                                               state->session->fingerprint, sessionId_);
     }
 
     // Save shortly after the state stops changing.
@@ -1153,16 +1176,21 @@ void CompView::drawRestoreOffer(ApiClient& client) {
         return;
     const SavedComp offer = *restoreOffer_;
     ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(palette_.accent),
-                       "Saved comp of this clip from %s with %d takes.",
-                       formatTime(offer.savedAt).c_str(), offer.takes);
+    const bool sameClip = offer.clip == restoreClip_;
+    const auto accent = ImGui::ColorConvertU32ToFloat4(palette_.accent);
+    if (sameClip)
+        ImGui::TextColored(accent, "Saved comp of this clip from %s with %d takes.",
+                           formatTime(offer.savedAt).c_str(), offer.takes);
+    else
+        ImGui::TextColored(accent, "This clip holds the comp of %s (%s, %d takes).",
+                           offer.clip.c_str(), formatTime(offer.savedAt).c_str(), offer.takes);
     ImGui::SameLine();
-    if (ImGui::Button("Restore")) {
+    if (ImGui::Button(sameClip ? "Restore" : "Continue with its takes")) {
         if (const auto document = store_->load(offer))
             client.send("import", {}, *document);
         restoreOffer_.reset();
     }
-    ImGui::SetItemTooltip("Replace the current takes with the saved comp");
+    ImGui::SetItemTooltip("Replace the current takes with the saved comp's takes and cuts");
     ImGui::SameLine();
     if (ImGui::Button("Dismiss"))
         restoreOffer_.reset();

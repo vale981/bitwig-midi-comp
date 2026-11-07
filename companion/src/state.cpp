@@ -106,6 +106,7 @@ State parseState(const std::string_view text) {
             .collecting = it->value("collecting", false),
             .track = it->value("track", std::string{}),
             .preview = {},
+            .fingerprint = it->value("fingerprint", std::string{}),
         };
         if (const auto preview = it->find("preview"); preview != it->end())
             for (const auto& p : *preview)

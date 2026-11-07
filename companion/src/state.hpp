@@ -54,6 +54,7 @@ struct Session {
     bool collecting = false;  ///< A recording waits for the clip to be selected.
     std::string track;        ///< Name of the comp clip's track.
     std::vector<PreviewPass> preview;  ///< Provisional takes of the current recording.
+    std::string fingerprint;           ///< The clip's content when the session started.
 };
 
 /** Snapshot of the extension state, see ``API.md``. */

@@ -56,6 +56,8 @@ final class CompExport
          .append(",\"clip\":").append(Json.quote(clip.label()))
          .append(",\"source\":").append(Json.quote(clip.source().name().toLowerCase()))
          .append(",\"stepSize\":").append(Json.number(stepSize))
+         .append(",\"fingerprint\":").append(Json.quote(Fingerprint.of(
+            model.render(stepSize).stream().map(CompModel.CompNote::note).toList(), stepSize)))
          .append(",\"takes\":[");
 
       final List<Take> takes = model.takes();

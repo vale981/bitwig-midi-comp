@@ -123,6 +123,32 @@ public class MidiCompExtension extends ControllerExtension
    /** A session waiting for its clip to be re-read at a new grid resolution. */
    private String pendingStart;
    private long pendingStartAt;
+   /** Fingerprint of the session clip's content when the session started. */
+   private String sessionFingerprint = "";
+   /** A duplicate of the session clip waiting to be selected, see :meth:`newVersion`. */
+   private PendingVersion pendingVersion;
+   /** A comp to import once the next session has started. */
+   private String carryAfterStart;
+
+   /** A duplicate being prepared; ``renamedTo`` is set once the copy was given its title. */
+   private static final class PendingVersion
+   {
+      final ClipRef original;
+      final String comp;
+      final long since;
+      String renamedTo;
+      long renamedAt;
+
+      PendingVersion(final ClipRef original, final String comp, final long since)
+      {
+         this.original = original;
+         this.comp = comp;
+         this.since = since;
+      }
+   }
+
+   private static final long VERSION_TIMEOUT_NANOS = 4_000_000_000L;
+   private static final long ARRANGER_VERSION_DELAY_NANOS = 600_000_000L;
    /** Keyboard notes sent by the companion, with timestamps. */
    private final KeyboardEvents keyboard = new KeyboardEvents();
    /** The transport position during the current recording. */
@@ -358,6 +384,7 @@ public class MidiCompExtension extends ControllerExtension
       }
 
       tickPendingStart();
+      tickVersion();
       tickSession();
       updatePreview();
 
@@ -387,7 +414,8 @@ public class MidiCompExtension extends ControllerExtension
             capture.isSinglePass(),
             isRecording() ? playedWraps + 1 : 0,
             capture.isPending() && !sessionAvailable(),
-            preview);
+            preview,
+            sessionFingerprint);
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
          session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
@@ -409,8 +437,14 @@ public class MidiCompExtension extends ControllerExtension
          case "clear" -> assign(intParam(p, "from"), intParam(p, "to"), -1);
          case "useTake" -> assign(0, model.length(), intParam(p, "take"));
          case "undoEdit" -> model.undo() ? Result.ok("Edit undone") : Result.fail("Nothing to undo");
-         case "start" -> startSession(p.getOrDefault("source", ""));
+         case "start" -> {
+            // A clip chosen by hand replaces a pending new version.
+            pendingVersion = null;
+            carryAfterStart = null;
+            yield startSession(p.getOrDefault("source", ""));
+         }
          case "end" -> endSession();
+         case "newVersion" -> newVersion();
          case "record" -> startRecording(!"false".equals(p.get("stopAtEnd")));
          case "stopRecording" -> stopRecording();
          case "revert" -> undoLastWrite();
@@ -677,6 +711,7 @@ public class MidiCompExtension extends ControllerExtension
       else if (waited > 5_000_000_000L)
       {
          pendingStart = null;
+         carryAfterStart = null;
          lastMessage = "Could not read the clip; select it and try again";
          markDirty();
       }
@@ -704,8 +739,16 @@ public class MidiCompExtension extends ControllerExtension
       if (ref.source() == Take.Source.LAUNCHER)
          pinTargetToSelection();
       live.link(ref, content);
+      sessionFingerprint = Fingerprint.of(content, stepSize);
       capture.start();
       log("Comping " + ref.label() + ": " + selected.describe());
+      if (carryAfterStart != null)
+      {
+         final String carried = carryAfterStart;
+         carryAfterStart = null;
+         final Result imported = importComp(carried);
+         return Result.ok("Comping the new version " + ref.label() + ": " + imported.message());
+      }
       return Result.ok("Comping " + ref.label() + ". Record into it with the loop on; each pass "
          + "becomes a take.");
    }
@@ -716,12 +759,107 @@ public class MidiCompExtension extends ControllerExtension
       if (old == null)
          return Result.fail("No comp session");
       live.unlink();
+      sessionFingerprint = "";
       capture.stop();
       if (old.source() == Take.Source.LAUNCHER)
          unpinTarget();
       model.clear();
       history.clear();
       return Result.ok("Finished comping " + old.label());
+   }
+
+   /**
+    * Duplicates the session clip as a new version that carries the comp: the copy gets the same
+    * takes and cuts, and the original keeps its comp. The session ends here and starts on the
+    * copy once Bitwig has selected it (:meth:`tickVersion`).
+    */
+   private Result newVersion()
+   {
+      final ClipRef original = live.link();
+      if (original == null)
+         return Result.fail("Start comping a clip first");
+      if (isRecording())
+         return Result.fail("Stop recording first");
+      final String comp = CompExport.write(model, original, project.get(), stepSize);
+      if (original.source() == Take.Source.LAUNCHER)
+         targetCursor.clipLauncherSlot().duplicateClip();
+      else
+         arranger.clip().duplicate();
+      endSession();
+      pendingVersion = new PendingVersion(original, comp, System.nanoTime());
+      log("Duplicating " + original.label() + " as a new version");
+      return Result.ok("Duplicating " + original.label());
+   }
+
+   /**
+    * Starts the session on the duplicate made by :meth:`newVersion` once it is selected: for
+    * launcher clips, when the selection shows another slot on the same track; arranger clips
+    * cannot be told apart (the API identifies them by track), so after a short delay.
+    */
+   private void tickVersion()
+   {
+      if (pendingVersion == null)
+         return;
+      final ClipRef original = pendingVersion.original;
+      final long now = System.nanoTime();
+      final long waited = now - pendingVersion.since;
+      final boolean launcher = original.source() == Take.Source.LAUNCHER;
+      final ClipRef selected = launcher ? launcherRef() : arrangerRef();
+      final EditableClip cursor = launcher ? launcherSel : arranger;
+      boolean ready = selected != null
+         && selected.trackPosition() == original.trackPosition()
+         && (launcher ? selected.sceneIndex() != original.sceneIndex()
+            : waited > ARRANGER_VERSION_DELAY_NANOS)
+         && cursor.isSettled(LiveSync.SETTLE_MILLIS);
+      if (ready && launcher)
+      {
+         // Give the copy its own title, so its comps are saved under it; start once Bitwig
+         // reports the new title (or after a second).
+         final String title = launcherCursor.clipLauncherSlot().name().get();
+         if (pendingVersion.renamedTo == null)
+         {
+            pendingVersion.renamedTo = nextVersionTitle(title);
+            pendingVersion.renamedAt = now;
+            launcherCursor.setName(pendingVersion.renamedTo);
+            log("Naming the copy \"" + pendingVersion.renamedTo + "\"");
+         }
+         ready = title.equals(pendingVersion.renamedTo)
+            || now - pendingVersion.renamedAt > 1_000_000_000L;
+      }
+      if (ready)
+      {
+         carryAfterStart = pendingVersion.comp;
+         pendingVersion = null;
+         final Result started = startSession(launcher ? "launcher" : "arranger");
+         if (!started.ok())
+            carryAfterStart = null;
+         lastMessage = started.message();
+         markDirty();
+      }
+      else if (waited > VERSION_TIMEOUT_NANOS)
+      {
+         pendingVersion = null;
+         log("Bitwig did not select the copy of " + original.label() + "; select it and comp it, "
+            + "the companion offers to continue with the comp");
+         lastMessage = "Select the copy in Bitwig and comp it; the comp is offered there";
+         markDirty();
+      }
+   }
+
+   /**
+    * Returns the title for a new version of a clip: "Lead" becomes "Lead v2", "Lead v2" becomes
+    * "Lead v3".
+    *
+    * Args:
+    *    title: the clip's title, possibly empty.
+    */
+   static String nextVersionTitle(final String title)
+   {
+      final java.util.regex.Matcher m =
+         java.util.regex.Pattern.compile("^(.*) v(\\d+)$").matcher(title.strip());
+      if (m.matches())
+         return m.group(1) + " v" + (Integer.parseInt(m.group(2)) + 1);
+      return title.isBlank() ? "Comp v2" : title.strip() + " v2";
    }
 
    /** Returns the cursor that shows the session clip. */

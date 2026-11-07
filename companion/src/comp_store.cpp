@@ -40,6 +40,7 @@ std::optional<SavedComp> readHeader(const fs::path& path) {
             .session = j.at("session").get<std::string>(),
             .takes = j.at("takes").get<int>(),
             .savedAt = j.at("savedAt").get<std::int64_t>(),
+            .fingerprint = j.value("fingerprint", std::string{}),
         };
     } catch (const json::exception&) {
         return std::nullopt;
@@ -99,6 +100,7 @@ bool CompStore::save(const std::string_view session, const std::string_view expo
         {"session", std::string(session)},
         {"takes", comp.at("takes").size()},
         {"savedAt", savedAt},
+        {"fingerprint", comp.value("fingerprint", std::string{})},
         {"comp", comp},
     };
 
@@ -135,6 +137,22 @@ std::vector<SavedComp> CompStore::list() const {
     }
     std::ranges::sort(comps, std::ranges::greater{}, &SavedComp::savedAt);
     return comps;
+}
+
+std::optional<SavedComp> CompStore::offerFor(const std::string_view project,
+                                             const std::string_view clip,
+                                             const std::string_view fingerprint,
+                                             const std::string_view excludeSession) const {
+    const auto comps = list();
+    for (const auto& comp : comps)
+        if (comp.project == project && comp.clip == clip && comp.session != excludeSession)
+            return comp;
+    if (!fingerprint.empty())
+        for (const auto& comp : comps)
+            if (comp.project == project && comp.fingerprint == fingerprint &&
+                comp.session != excludeSession)
+                return comp;
+    return std::nullopt;
 }
 
 std::optional<SavedComp> CompStore::newestFor(const std::string_view project,

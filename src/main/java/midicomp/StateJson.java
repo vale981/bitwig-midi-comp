@@ -42,6 +42,7 @@ final class StateJson
     *    recordingPass: the loop pass being recorded (1-based), or 0 when not recording.
     *    collecting: whether a recording waits for the clip to be selected to become takes.
     *    preview: provisional takes of the current recording, from the keyboard notes.
+    *    fingerprint: fingerprint of the clip's content when the session started.
     */
    record SessionStatus(
       ClipRef clip,
@@ -54,7 +55,8 @@ final class StateJson
       boolean singlePass,
       int recordingPass,
       boolean collecting,
-      List<PreviewPass> preview)
+      List<PreviewPass> preview,
+      String fingerprint)
    {
    }
 
@@ -125,6 +127,7 @@ final class StateJson
             .append(",\"recordingPass\":").append(session.recordingPass())
             .append(",\"collecting\":").append(session.collecting())
             .append(",\"track\":").append(Json.quote(session.clip().trackName()))
+            .append(",\"fingerprint\":").append(Json.quote(session.fingerprint()))
             .append(",\"preview\":[");
       if (session != null)
       {

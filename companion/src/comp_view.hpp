@@ -179,6 +179,10 @@ class CompView {
     std::string sessionKey_;  ///< Project and clip of the current session.
     std::string sessionId_;   ///< File identifier of the current session.
     std::optional<SavedComp> restoreOffer_;
+    std::string restoreClip_;  ///< Label of the session the offer was made for.
+    /** "New version" was pressed: the copy gets the comp from the extension, not an offer. */
+    std::atomic<bool> versionRequested_{false};
+    std::atomic<bool> versionSaved_{false};  ///< The comp was saved; send ``newVersion``.
     long long lastVersion_ = -1;
     double lastChange_ = 0.0;
     std::atomic<long long> savedVersion_{-1};
