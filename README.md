@@ -50,9 +50,9 @@ Two parts:
    ![Waiting for the first pass](docs/screenshots/record.png)
 
 3. **Comp.** Drag across a take lane to use that take for the range (snapped to the *Snap* grid);
-   drag across the comp lane to make a range silent. The clip is rewritten as you edit. While the
-   comp is still a single take, each new pass replaces it, as with Bitwig's audio takes; once
-   takes are cut together, new passes only add lanes.
+   drag across the comp lane to make a range silent. The clip is rewritten as you edit. Each new
+   pass is added as a lane. While the comp still uses a single take throughout, it switches to the
+   new pass, as with Bitwig's audio takes; once takes are cut together, the comp stays as it is.
 
 4. **Finish.** *Done* ends the session; the clip keeps the comp. *Revert* restores the clip as it
    was before the session and ends it.
@@ -128,13 +128,13 @@ arrives at a copy goes out on its raw device, which Bitwig has open.
 
 The copies cannot be renamed: the kernel names them after their card and device number. A
 fixed card number keeps the names the same, and `midi-copies list` shows which copy belongs to
-which device:
+which device. With a keyboard that has two ports, of which only the first accepts input:
 
 ```
 $ midi-copies list
 VirMIDI 16-0     <- USB Axiom 61:USB Axiom 61 MIDI 1 (and back)
 VirMIDI 16-1     <- USB Axiom 61:USB Axiom 61 MIDI 2
-VirMIDI 16-2     <- Launchpad X:Launchpad X LPX MIDI In (and back)
+VirMIDI 16-2     <- (free)
 VirMIDI 16-3     <- (free)
 ```
 
@@ -203,8 +203,9 @@ mvn package                      # extension + tests -> target/MidiComp.bwextens
 nix build .#companion            # companion -> result/bin/midicomp-companion
 ```
 
-Without Nix, the companion needs CMake 3.25, a C++23 compiler and OpenGL. GLFW, Dear ImGui,
-nlohmann/json and cpp-httplib are used when installed and downloaded otherwise:
+Without Nix, the companion needs CMake 3.25, a C++23 compiler, OpenGL and, on Linux, the ALSA
+headers (`libasound2-dev` on Debian and Ubuntu). GLFW, Dear ImGui, nlohmann/json, cpp-httplib and
+RtMidi are used when installed and downloaded otherwise:
 
 ```sh
 cmake -S companion -B build -DCMAKE_BUILD_TYPE=Release
@@ -225,7 +226,7 @@ The images in `docs/screenshots` are rendered headless with Xvfb and Mesa's soft
 against a mock of the API:
 
 ```sh
-python3 tools/mock_api.py 18799 /tmp/mock-endpoint.json session &   # or: start, record
+python3 tools/mock_api.py 18799 /tmp/mock-endpoint.json session &   # or: start, record, recording, select
 xvfb-run -s "-screen 0 1280x760x24" \
   ./companion/build/midicomp-companion --endpoint /tmp/mock-endpoint.json --screenshot out.ppm
 ```
@@ -254,8 +255,8 @@ On NixOS, point `LD_LIBRARY_PATH` at Mesa's `lib` directory and set
 
 These behaviors come from the API documentation and have not been verified in Bitwig yet:
 
-- Recording state is read from the transport (arranger) and the clip slot (launcher); loop passes
-  are detected from the transport position and the clip's playing step.
+- Launcher recordings: the recording state is read from the clip slot and loop passes from the
+  clip's playing step. (Arranger recordings, read from the transport, have been tested.)
 - When a cursor moves to another clip, the host reports `Empty` for the old notes and `NoteOn`
   for the new ones within the 150 ms settle window.
 - A 16384 x 128 grid does not cost much memory or CPU in the host.
