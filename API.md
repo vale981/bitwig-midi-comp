@@ -150,8 +150,9 @@ the step size, so `import` can rescale positions if the timing resolution change
   3 s, since Bitwig may add recorded notes only after recording stops. Passes are collected once
   a clip on the comp clip's track is selected. Afterwards the comp is written over the recording.
 - Bitwig hides arranger clips from extensions while recording. For arranger recordings, the
-  notes played on the extension's MIDI input are logged with pass and loop position, and the
-  recording's notes are sorted into passes by matching them per key, in order of loop position,
-  within 80 ms. Unmatched notes go to the last pass.
+  notes played on the extension's MIDI input (or, without it, the notes the comp track plays) are
+  logged with pass and loop position, and the recorded notes are sorted into passes by matching
+  them per key, in order of loop position, within 80 ms. Unmatched notes go to the last pass. The
+  takes consist of the recorded notes; the observed notes only decide the pass.
 - `log` lists recent capture events (recording start and stop, wraps, collected passes); the
   same lines go to Bitwig's controller console.

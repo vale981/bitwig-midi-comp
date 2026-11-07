@@ -26,11 +26,13 @@ Two parts:
    *Stop*, and every loop pass becomes a take. When recording stops, the comp is written back.
 
    Bitwig hides the arranger clip from extensions while it records and merges all passes into
-   it, so the passes are sorted afterwards: the extension listens to your keyboard on its MIDI
-   input, notes which pass and loop position each key was played at, and matches Bitwig's
-   recorded notes (exact timing, all attributes) to them. Notes played within a few milliseconds
-   of the same key in another pass may swap passes. Without the MIDI input configured, a
-   recording becomes one take. Overdub is left as you set it: without it Bitwig records
+   it, so the passes are sorted afterwards. While recording, the extension notes which pass and
+   loop position each key was played at, and then matches Bitwig's recorded notes to them. The
+   takes always consist of Bitwig's recorded notes (exact timing, all attributes); the observed
+   notes only decide the pass. They come from the extension's MIDI input if your keyboard is
+   assigned to it, otherwise from the notes the comp track plays (no setup; clip playback on that
+   track would be mixed in, which the log reports). Notes played within a few milliseconds of the
+   same key in another pass may swap passes. Overdub is left as you set it: without it Bitwig records
    into a new clip on top of the comp clip, which then becomes the comp clip. *Log* shows what the
    extension saw (recording, loop wraps, collected passes), which helps when a pass does not show
    up.
@@ -79,11 +81,12 @@ Download the extension and the companion for your platform from the
 
 1. Copy `MidiComp.bwextension` to `~/Bitwig Studio/Extensions/` (Windows:
    `Documents\Bitwig Studio\Extensions`).
-2. In Bitwig: *Dashboard > Settings > Controllers > Add controller > Utility > MIDI Comp*, and
-   select the keyboard you record with as its MIDI input. The extension forwards the keyboard as
-   a note input, so tracks set to *All ins* (or to *MIDI Comp*) keep receiving it; if the keyboard
-   is also used by another controller, set the recording track's input to one of them to avoid
-   doubled notes.
+2. In Bitwig: *Dashboard > Settings > Controllers > Add controller > Utility > MIDI Comp*. Its MIDI
+   input is optional: if you select your keyboard there, its notes time the loop passes most
+   directly (the extension forwards the keyboard as a note input, so tracks set to *All ins* keep
+   receiving it; with the keyboard on two controllers, set the recording track's input to one of
+   them). Without it, the notes played on the comp track are used. On Linux the keyboard can be
+   duplicated with `snd-virmidi` and `aconnect` to use it on both controllers.
 3. Start `midicomp-companion`. It finds the extension through `~/.midicomp/endpoint.json`, which
    the extension writes on startup, and reconnects when the extension restarts.
 
