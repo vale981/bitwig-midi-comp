@@ -4,9 +4,12 @@
 #include "comp_store.hpp"
 #include "midi_input.hpp"
 #include "palette.hpp"
+#include "settings.hpp"
 #include "snap.hpp"
 
+#include <array>
 #include <atomic>
+#include <filesystem>
 #include <imgui.h>
 #include <optional>
 #include <string>
@@ -71,6 +74,18 @@ class CompView {
      *     scale: factor on top of the display's scale.
      */
     void setUiScale(const float scale) { uiScale_ = scale; }
+
+    /**
+     * Uses ``settings`` for the lane height and saves changes to ``path``.
+     *
+     * Args:
+     *     settings: preferences; must outlive the view.
+     *     path: the settings file.
+     */
+    void setSettings(Settings* settings, std::filesystem::path path) {
+        settings_ = settings;
+        settingsPath_ = std::move(path);
+    }
 
     /** Returns a UI scale factor the user chose since the last call, if any. */
     [[nodiscard]] std::optional<float> takeUiScaleRequest() {
@@ -154,6 +169,12 @@ class CompView {
     void drawLog(const State& state);
     void updateStore(ApiClient& client, const State* state);
     void drawRestoreOffer(ApiClient& client);
+    /** Draws the popup listing the project's saved comps, the best guess selected. */
+    void drawSavedComps(ApiClient& client, const State& state);
+    /** Imports a saved comp into the session and adopts its name. */
+    void restore(ApiClient& client, const SavedComp& comp);
+    /** Saves the comp now (for example after renaming), in the background. */
+    void saveNow(ApiClient& client);
     [[nodiscard]] const SavedComp* savedFor(const State& state, const std::string& clip) const;
 
     Palette palette_;
@@ -164,6 +185,13 @@ class CompView {
     // Keyboard input.
     MidiInput* midi_ = nullptr;
     std::string demoKeyboard_;
+    Settings* settings_ = nullptr;
+    std::filesystem::path settingsPath_;
+    std::string compName_;                 ///< Name of the current session's comp.
+    std::array<char, 128> nameBuffer_{};   ///< Text field contents for :member:`compName_`.
+    std::vector<SavedComp> savedChoices_;  ///< The list shown by :meth:`drawSavedComps`.
+    int savedChoice_ = 0;
+    bool openSavedComps_ = false;  ///< Open the saved-comps popup on the next frame.
     float uiScale_ = 1.0f;
     std::optional<float> uiScaleRequest_;
     float scaleDraft_ = 100.0f;  ///< Slider value in percent while it is being dragged.

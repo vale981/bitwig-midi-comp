@@ -148,7 +148,6 @@ public class MidiCompExtension extends ControllerExtension
    }
 
    private static final long VERSION_TIMEOUT_NANOS = 4_000_000_000L;
-   private static final long ARRANGER_VERSION_DELAY_NANOS = 600_000_000L;
    /** Keyboard notes sent by the companion, with timestamps. */
    private final KeyboardEvents keyboard = new KeyboardEvents();
    /** The transport position during the current recording. */
@@ -772,19 +771,23 @@ public class MidiCompExtension extends ControllerExtension
     * Duplicates the session clip as a new version that carries the comp: the copy gets the same
     * takes and cuts, and the original keeps its comp. The session ends here and starts on the
     * copy once Bitwig has selected it (:meth:`tickVersion`).
+    *
+    * Launcher clips only: ``Clip.duplicate()`` extends an arranger clip instead of copying it,
+    * and the API identifies arranger clips by track, so a copy on the same track would receive
+    * every edit too.
     */
    private Result newVersion()
    {
       final ClipRef original = live.link();
       if (original == null)
          return Result.fail("Start comping a clip first");
+      if (original.source() != Take.Source.LAUNCHER)
+         return Result.fail("New versions work for launcher clips. For arranger clips, duplicate "
+            + "the clip to another track in Bitwig and comp the copy; the comp is offered there.");
       if (isRecording())
          return Result.fail("Stop recording first");
       final String comp = CompExport.write(model, original, project.get(), stepSize);
-      if (original.source() == Take.Source.LAUNCHER)
-         targetCursor.clipLauncherSlot().duplicateClip();
-      else
-         arranger.clip().duplicate();
+      targetCursor.clipLauncherSlot().duplicateClip();
       endSession();
       pendingVersion = new PendingVersion(original, comp, System.nanoTime());
       log("Duplicating " + original.label() + " as a new version");
@@ -792,9 +795,8 @@ public class MidiCompExtension extends ControllerExtension
    }
 
    /**
-    * Starts the session on the duplicate made by :meth:`newVersion` once it is selected: for
-    * launcher clips, when the selection shows another slot on the same track; arranger clips
-    * cannot be told apart (the API identifies them by track), so after a short delay.
+    * Starts the session on the duplicate made by :meth:`newVersion` once the launcher selection
+    * shows another slot on the same track.
     */
    private void tickVersion()
    {
@@ -803,15 +805,12 @@ public class MidiCompExtension extends ControllerExtension
       final ClipRef original = pendingVersion.original;
       final long now = System.nanoTime();
       final long waited = now - pendingVersion.since;
-      final boolean launcher = original.source() == Take.Source.LAUNCHER;
-      final ClipRef selected = launcher ? launcherRef() : arrangerRef();
-      final EditableClip cursor = launcher ? launcherSel : arranger;
+      final ClipRef selected = launcherRef();
       boolean ready = selected != null
          && selected.trackPosition() == original.trackPosition()
-         && (launcher ? selected.sceneIndex() != original.sceneIndex()
-            : waited > ARRANGER_VERSION_DELAY_NANOS)
-         && cursor.isSettled(LiveSync.SETTLE_MILLIS);
-      if (ready && launcher)
+         && selected.sceneIndex() != original.sceneIndex()
+         && launcherSel.isSettled(LiveSync.SETTLE_MILLIS);
+      if (ready)
       {
          // Give the copy its own title, so its comps are saved under it; start once Bitwig
          // reports the new title (or after a second).
@@ -830,7 +829,7 @@ public class MidiCompExtension extends ControllerExtension
       {
          carryAfterStart = pendingVersion.comp;
          pendingVersion = null;
-         final Result started = startSession(launcher ? "launcher" : "arranger");
+         final Result started = startSession("launcher");
          if (!started.ok())
             carryAfterStart = null;
          lastMessage = started.message();

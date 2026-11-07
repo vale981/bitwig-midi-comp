@@ -19,6 +19,10 @@ struct SavedComp {
     int takes = 0;
     std::int64_t savedAt = 0;  ///< Seconds since the Unix epoch.
     std::string fingerprint;   ///< Fingerprint of the comp's notes, see the extension's API.
+    std::string name;          ///< Name given in the companion, or empty.
+
+    /** Returns the name, or the clip label for an unnamed comp. */
+    [[nodiscard]] const std::string& title() const { return name.empty() ? clip : name; }
 };
 
 /**
@@ -56,11 +60,13 @@ class CompStore {
      *     session: identifier of the comp session.
      *     exportJson: body of ``GET /api/v1/export``.
      *     savedAt: time of saving, seconds since the Unix epoch.
+     *     name: name given to the comp, or empty.
      *
      * Returns:
      *     Whether the comp was written.
      */
-    bool save(std::string_view session, std::string_view exportJson, std::int64_t savedAt);
+    bool save(std::string_view session, std::string_view exportJson, std::int64_t savedAt,
+              std::string_view name = {});
 
     /** Returns all saved comps, newest first. Unreadable files are skipped. */
     [[nodiscard]] std::vector<SavedComp> list() const;

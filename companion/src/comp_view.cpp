@@ -233,21 +233,27 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::SameLine();
         if (versionSaved_.exchange(false))
             client.send("newVersion");
-        ImGui::BeginDisabled(session.recording || versionRequested_);
+        const bool launcherClip = session.source == "launcher";
+        ImGui::BeginDisabled(session.recording || versionRequested_ || !launcherClip);
         if (ImGui::Button("New version")) {
             // Save the comp first, so the copy can also be continued by hand.
             versionRequested_ = true;
-            client.fetch("export", [this, id = sessionId_](std::optional<std::string> doc) {
-                if (doc && store_ != nullptr && store_->save(id, *doc, unixNow()))
+            client.fetch("export", [this, id = sessionId_,
+                                    name = compName_](std::optional<std::string> doc) {
+                if (doc && store_ != nullptr && store_->save(id, *doc, unixNow(), name))
                     storeChanged_ = true;
                 versionSaved_ = true;
             });
         }
         ImGui::SetItemTooltip(
-            "Duplicate the clip in Bitwig and continue comping the copy with the same takes "
-            "and cuts.\nThe original keeps its comp. Arranger copies stay on the same track, "
-            "where the extension\ncannot tell them apart: while comping, select only the "
-            "copy.");
+            "%s", launcherClip
+                      ? "Duplicate the clip into another slot and continue comping the copy with "
+                        "the same takes and cuts.\nThe original keeps its comp; the copy gets a "
+                        "version suffix (\"Lead v2\")."
+                      : "Launcher clips only. For an arranger clip, duplicate it to another track "
+                        "in Bitwig\nand comp the copy; the companion offers to continue with "
+                        "this comp.\n(On the same track, the extension cannot tell the clips "
+                        "apart.)");
         ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button("Done"))
@@ -298,6 +304,21 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
             client.send("undoEdit");
         ImGui::SetItemTooltip("Ctrl+Z");
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 11.0f);
+        ImGui::InputTextWithHint("##compName", "Comp name", nameBuffer_.data(), nameBuffer_.size());
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            compName_ = nameBuffer_.data();
+            saveNow(client);
+        }
+        ImGui::SetItemTooltip("Name of this comp in the list of saved comps");
+        ImGui::SameLine();
+        if (ImGui::Button("Saved comps..."))
+            ImGui::OpenPopup("savedComps");
+        ImGui::SetItemTooltip("Restore a saved comp of this project");
+        drawSavedComps(client, *state);
     }
 
     std::optional<Reply> message = client.lastReply();
@@ -526,6 +547,23 @@ void CompView::drawViewMenu() {
     if (ImGui::SmallButton("100%"))
         uiScaleRequest_ = 1.0f;
     ImGui::TextDisabled("On top of the display's scale. Ctrl+= / Ctrl+- / Ctrl+0");
+
+    if (settings_ != nullptr) {
+        ImGui::Separator();
+        bool fit = settings_->laneHeight <= 0.0f;
+        if (ImGui::Checkbox("Fit lanes to the window", &fit)) {
+            settings_->laneHeight = fit ? 0.0f : 110.0f;
+            saveSettings(settingsPath_, *settings_);
+        }
+        ImGui::BeginDisabled(fit);
+        float height = fit ? 110.0f : settings_->laneHeight;
+        ImGui::SetNextItemWidth(160.0f * ImGui::GetFontSize() / 13.0f);
+        if (ImGui::SliderFloat("Lane height", &height, 40.0f, 400.0f, "%.0f px") && !fit)
+            settings_->laneHeight = height;
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            saveSettings(settingsPath_, *settings_);
+        ImGui::EndDisabled();
+    }
     ImGui::EndPopup();
 }
 
@@ -666,7 +704,10 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
     const float topHeight = rulerHeight + compHeight;
     const auto& preview = state.preview();
     const std::size_t laneCount = state.takes.size() + preview.size();
-    const float takeHeight = std::clamp((area.y - topHeight - style.ScrollbarSize) /
+    const float fixedHeight = settings_ != nullptr ? settings_->laneHeight : 0.0f;
+    const float takeHeight =
+        fixedHeight > 0.0f ? fixedHeight * scale
+                           : std::clamp((area.y - topHeight - style.ScrollbarSize) /
                                             static_cast<float>(std::max<std::size_t>(1, laneCount)),
                                         64.0f * scale, 150.0f * scale);
 
@@ -1145,6 +1186,8 @@ void CompView::updateStore(ApiClient& client, const State* state) {
         savedVersion_ = -1;
         lastVersion_ = -1;
         restoreClip_ = state->session->label;
+        compName_.clear();
+        nameBuffer_.fill('\0');
         restoreOffer_ = versionRequested_.exchange(false)
                             ? std::nullopt
                             : store_->offerFor(state->project, state->session->label,
@@ -1163,8 +1206,9 @@ void CompView::updateStore(ApiClient& client, const State* state) {
         return;
     saving_ = true;
     const long long version = state->version;
-    client.fetch("export", [this, version, id = sessionId_](std::optional<std::string> doc) {
-        if (doc && store_->save(id, *doc, unixNow()))
+    client.fetch("export", [this, version, id = sessionId_,
+                            name = compName_](std::optional<std::string> doc) {
+        if (doc && store_->save(id, *doc, unixNow(), name))
             storeChanged_ = true;
         savedVersion_ = version;
         saving_ = false;
@@ -1179,22 +1223,114 @@ void CompView::drawRestoreOffer(ApiClient& client) {
     const bool sameClip = offer.clip == restoreClip_;
     const auto accent = ImGui::ColorConvertU32ToFloat4(palette_.accent);
     if (sameClip)
-        ImGui::TextColored(accent, "Saved comp of this clip from %s with %d takes.",
+        ImGui::TextColored(accent, "Saved comp of this clip%s%s from %s with %d takes.",
+                           offer.name.empty() ? "" : ", ", offer.name.c_str(),
                            formatTime(offer.savedAt).c_str(), offer.takes);
     else
-        ImGui::TextColored(accent, "This clip holds the comp of %s (%s, %d takes).",
-                           offer.clip.c_str(), formatTime(offer.savedAt).c_str(), offer.takes);
+        ImGui::TextColored(accent, "This clip holds the comp %s%sof %s (%s, %d takes).",
+                           offer.name.c_str(), offer.name.empty() ? "" : " ", offer.clip.c_str(),
+                           formatTime(offer.savedAt).c_str(), offer.takes);
     ImGui::SameLine();
     if (ImGui::Button(sameClip ? "Restore" : "Continue with its takes")) {
-        if (const auto document = store_->load(offer))
-            client.send("import", {}, *document);
+        restore(client, offer);
         restoreOffer_.reset();
     }
     ImGui::SetItemTooltip("Replace the current takes with the saved comp's takes and cuts");
     ImGui::SameLine();
+    if (ImGui::Button("Choose...")) {
+        restoreOffer_.reset();
+        openSavedComps_ = true;
+    }
+    ImGui::SetItemTooltip("Pick another saved comp of this project");
+    ImGui::SameLine();
     if (ImGui::Button("Dismiss"))
         restoreOffer_.reset();
     ImGui::Separator();
+}
+
+void CompView::restore(ApiClient& client, const SavedComp& comp) {
+    if (const auto document = store_->load(comp))
+        client.send("import", {}, *document);
+    compName_ = comp.name;
+    nameBuffer_.fill('\0');
+    compName_.copy(nameBuffer_.data(), nameBuffer_.size() - 1);
+}
+
+void CompView::saveNow(ApiClient& client) {
+    if (store_ == nullptr || saving_)
+        return;
+    saving_ = true;
+    client.fetch("export",
+                 [this, id = sessionId_, name = compName_](std::optional<std::string> doc) {
+                     if (doc && store_->save(id, *doc, unixNow(), name))
+                         storeChanged_ = true;
+                     saving_ = false;
+                 });
+}
+
+void CompView::drawSavedComps(ApiClient& client, const State& state) {
+    if (store_ == nullptr)
+        return;
+    if (std::exchange(openSavedComps_, false))
+        ImGui::OpenPopup("savedComps");
+    if (ImGui::IsPopupOpen("savedComps") && savedChoices_.empty()) {
+        // Best guess first (same title, else same notes), then the newest.
+        const auto best = store_->offerFor(state.project, state.session->label,
+                                           state.session->fingerprint, sessionId_);
+        if (best)
+            savedChoices_.push_back(*best);
+        for (const auto& comp : store_->list())
+            if (comp.project == state.project && comp.session != sessionId_ &&
+                (!best || comp.path != best->path))
+                savedChoices_.push_back(comp);
+        savedChoice_ = 0;
+    }
+    if (!ImGui::BeginPopup("savedComps")) {
+        savedChoices_.clear();
+        return;
+    }
+    ImGui::TextUnformatted("Saved comps of this project");
+    if (savedChoices_.empty())
+        ImGui::TextDisabled("None yet. Comps are saved shortly after every change.");
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    if (ImGui::BeginListBox("##saved", ImVec2(520.0f * scale, 240.0f * scale))) {
+        for (int i = 0; i < static_cast<int>(savedChoices_.size()); ++i) {
+            const SavedComp& comp = savedChoices_[static_cast<std::size_t>(i)];
+            std::string label = comp.title();
+            if (!comp.name.empty())
+                label += "  (" + comp.clip + ")";
+            label += "  \u00b7  " + formatTime(comp.savedAt) + ", " + str(comp.takes) + " takes";
+            if (i == 0 && comp.clip == state.session->label)
+                label += "  \u00b7  this clip";
+            else if (i == 0 && !comp.fingerprint.empty() &&
+                     comp.fingerprint == state.session->fingerprint)
+                label += "  \u00b7  same notes";
+            ImGui::PushID(i);
+            if (ImGui::Selectable(label.c_str(), i == savedChoice_,
+                                  ImGuiSelectableFlags_AllowDoubleClick)) {
+                savedChoice_ = i;
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    restore(client, comp);
+                    restoreOffer_.reset();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndListBox();
+    }
+    ImGui::BeginDisabled(savedChoices_.empty());
+    if (ImGui::Button("Restore")) {
+        restore(client, savedChoices_[static_cast<std::size_t>(savedChoice_)]);
+        restoreOffer_.reset();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SetItemTooltip("Replace the current takes with the chosen comp's takes and cuts");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
 }
 
 const SavedComp* CompView::savedFor(const State& state, const std::string& clip) const {

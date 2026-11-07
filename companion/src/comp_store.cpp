@@ -41,6 +41,7 @@ std::optional<SavedComp> readHeader(const fs::path& path) {
             .takes = j.at("takes").get<int>(),
             .savedAt = j.at("savedAt").get<std::int64_t>(),
             .fingerprint = j.value("fingerprint", std::string{}),
+            .name = j.value("name", std::string{}),
         };
     } catch (const json::exception&) {
         return std::nullopt;
@@ -82,7 +83,7 @@ fs::path CompStore::defaultDir() {
 }
 
 bool CompStore::save(const std::string_view session, const std::string_view exportJson,
-                     const std::int64_t savedAt) {
+                     const std::int64_t savedAt, const std::string_view name) {
     json comp;
     try {
         comp = json::parse(exportJson);
@@ -101,6 +102,7 @@ bool CompStore::save(const std::string_view session, const std::string_view expo
         {"takes", comp.at("takes").size()},
         {"savedAt", savedAt},
         {"fingerprint", comp.value("fingerprint", std::string{})},
+        {"name", std::string(name)},
         {"comp", comp},
     };
 

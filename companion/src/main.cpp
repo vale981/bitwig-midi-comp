@@ -3,6 +3,7 @@
 #include "comp_view.hpp"
 #include "midi_input.hpp"
 #include "palette.hpp"
+#include "settings.hpp"
 #include "theme.hpp"
 
 #include <GLFW/glfw3.h>
@@ -226,22 +227,8 @@ void measureDisplay(GLFWwindow* window, Scaling& scaling) {
                               : 1.0f;
 }
 
-fs::path scaleSettingPath() {
-    return midicomp::CompStore::defaultDir().parent_path() / "ui-scale.txt";
-}
-
-float loadScaleSetting() {
-    std::ifstream in(scaleSettingPath());
-    float value = 1.0f;
-    if (in >> value && value >= 0.5f && value <= 4.0f)
-        return value;
-    return 1.0f;
-}
-
-void saveScaleSetting(const float value) {
-    std::error_code ec;
-    fs::create_directories(scaleSettingPath().parent_path(), ec);
-    std::ofstream(scaleSettingPath()) << value << '\n';
+fs::path settingsPath() {
+    return midicomp::CompStore::defaultDir().parent_path() / "settings.json";
 }
 
 /** Set from GLFW's callback when the window moves to a display with another scale. */
@@ -280,7 +267,8 @@ int main(int argc, char** argv) {
 
     Scaling scaling;
     measureDisplay(window, scaling);
-    scaling.user = options->scale.value_or(loadScaleSetting());
+    midicomp::Settings settings = midicomp::loadSettings(settingsPath());
+    scaling.user = options->scale.value_or(settings.uiScale);
     glfwSetWindowContentScaleCallback(window, [](GLFWwindow*, float, float) {
         displayScaleChanged = true;
         glfwPostEmptyEvent();
@@ -291,6 +279,7 @@ int main(int argc, char** argv) {
     ImGui::GetIO().IniFilename = nullptr;
 
     midicomp::CompView view;
+    view.setSettings(&settings, settingsPath());
     midicomp::CompStore store(options->storeDir);
     view.setStore(&store);
     // Rendered screenshots should not depend on the connected devices.
@@ -358,8 +347,10 @@ int main(int argc, char** argv) {
             }
             if (const auto requested = view.takeUiScaleRequest()) {
                 scaling.user = *requested;
-                if (!options->scale)
-                    saveScaleSetting(scaling.user);
+                if (!options->scale) {
+                    settings.uiScale = scaling.user;
+                    midicomp::saveSettings(settingsPath(), settings);
+                }
                 applyScaling(true);
             }
             if (watcher.changed())

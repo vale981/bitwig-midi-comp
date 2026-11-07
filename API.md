@@ -83,7 +83,8 @@ State document:
     "track": "Keys",                // the comp clip's track
     "preview": [                    // provisional takes while recording (arranger), from the
       {"pass": 1, "notes": [...]}   // keyboard notes; replaced by the takes once assembled
-    ]
+    ],
+    "fingerprint": "3f2a9c01d4e5b677"  // the clip's notes when the session started, see below
   },
   "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [
@@ -108,6 +109,7 @@ Bitwig did not process the command within 5 s.
 |--------------|-----------------------------|--------|
 | `start`      | `source=launcher\|arranger` | Start a session on the selected clip; ends a running session. The grid resolution is chosen for the clip; if it changes, the clip is re-read first and the reply says "Preparing". |
 | `end`        |                             | End the session; the clip keeps the comp. |
+| `newVersion` |                             | Launcher sessions: duplicate the session clip into another slot and continue on the copy with the same takes and segments; the original keeps its comp. The session ends at once and starts on the copy when Bitwig selects it, after renaming it with a version suffix. If Bitwig does not select the copy within 4 s, the log says so. Fails for arranger sessions. |
 | `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start. Passes become takes (assembled with the keyboard notes from `played`, see below); the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
 | `stopRecording` |                          | Stop the transport and arranger recording. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
@@ -135,6 +137,14 @@ and `now` over the last minute, so a different clock base still works. Only note
 messages are used; the companion takes the time of each message from the MIDI driver's
 timestamps rather than from its arrival. Messages are kept for 15 minutes.
 
+### Fingerprints
+
+`fingerprint` (in the session state and in `export`) identifies a clip's content: the first 16
+hex digits of a SHA-256 over the sorted `channel:key:position` of its notes, with the position
+in beats rounded to 1/960 beat. The session's value describes the clip when the session
+started; the export's describes the comp. A clip that holds a saved comp, such as a copy of the
+comp clip, has the fingerprint of that comp.
+
 ### `GET /api/v1/export`
 
 Returns the session's comp at full fidelity, for saving: every note attribute, the segments, and
@@ -143,7 +153,7 @@ the step size, so `import` can rescale positions if the timing resolution change
 
 ```jsonc
 {"format": 1, "project": "My song", "clip": "Keys (arranger)", "source": "arranger",
- "stepSize": 0.0078125,
+ "stepSize": 0.0078125, "fingerprint": "3f2a9c01d4e5b677",
  "takes": [{"name": "Pass 1", "source": "arranger", "length": 2048,
             "notes": [{"ch": 0, "x": 0, "key": 60, "vel": 0.8, "rel": 0.5, "dur": 0.5,
                        "pan": 0, "timbre": 0, "pressure": 0, "gain": 0, "transpose": 0,

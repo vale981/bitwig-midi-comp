@@ -2,6 +2,7 @@
 #include "comp_store.hpp"
 #include "midi_input.hpp"
 #include "palette.hpp"
+#include "settings.hpp"
 #include "snap.hpp"
 #include "state.hpp"
 #include "theme.hpp"
@@ -253,6 +254,12 @@ void testCompStore() {
     CHECK(store.offerFor("Song", "Bass", "abc", "v2")->session == "s3");
     CHECK(!store.offerFor("Song", "Keys / Take A copy", "abc", "v1").has_value());
 
+    // Names are kept with the comp; unnamed comps are titled by their clip.
+    CHECK(store.save("n1", exportDoc("Lead", 2), 6000, "Chorus take"));
+    const auto named = store.newestFor("Song", "Lead", "");
+    CHECK(named && named->name == "Chorus take" && named->title() == "Chorus take");
+    CHECK(store.newestFor("Song", "Bass", "")->title() == "Bass");
+
     CHECK(fileComponent("Keys / Take 1 (ä)") == "Keys___Take_1_____");  // ä is two bytes
     CHECK(fileComponent("") == "untitled");
 }
@@ -270,6 +277,17 @@ void testPreview() {
     CHECK(s.preview().size() == 1 && s.preview()[0].pass == 3);
     CHECK(s.preview()[0].notes.size() == 1 && s.preview()[0].notes[0].key == 40);
     CHECK(s.keyRange().first <= 40);  // provisional notes count for the key range
+}
+
+void testSettings() {
+    const TempDir dir("settings");
+    const fs::path file = dir.path / "settings.json";
+    CHECK(loadSettings(file) == Settings{});  // missing file: defaults
+    CHECK(saveSettings(file, Settings{.uiScale = 1.5f, .laneHeight = 90.0f}));
+    const Settings read = loadSettings(file);
+    CHECK(read.uiScale == 1.5f && read.laneHeight == 90.0f);
+    write(file, R"({"uiScale": 99, "laneHeight": -3})");
+    CHECK(loadSettings(file) == Settings{});  // out of range: defaults
 }
 
 void testMidi() {
@@ -320,6 +338,7 @@ int main() {
         {"compStore", testCompStore},
         {"midi", testMidi},
         {"preview", testPreview},
+        {"settings", testSettings},
     };
     for (const auto& [name, test] : tests) {
         const int before = failures;

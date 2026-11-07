@@ -88,12 +88,23 @@ says which track to click. Launcher clips are pinned by the session and have no 
 ![Waiting for a click in Bitwig after recording](docs/screenshots/select.png)
 
 **Saved comps.** The companion saves the current comp shortly after every change, one file per
-session, keeping the ten newest per clip. When you comp a clip with a saved comp in the same
-project, a banner offers *Restore*, and the start screen notes it. Files live in
+session, keeping the ten newest per clip. Give a comp a name in the *Comp name* field to find it
+again. When you comp a clip with a saved comp in the same project, a banner offers *Restore*,
+and the start screen notes it; *Saved comps...* (or *Choose...* in the banner) lists all comps of
+the project to restore any of them, with the best guess selected. The best guess is the newest
+comp of the clip (by title), else a comp whose notes the clip holds, for example a copy of the
+clip or a renamed one. Files live in
 `~/.local/share/midicomp/comps` (Linux, or `$XDG_DATA_HOME`), `~/Library/Application
 Support/midicomp/comps` (macOS) or `%APPDATA%\midicomp\comps` (Windows); `--store-dir`
 changes it. Saved comps contain every note attribute and are restored at full fidelity, also
 after a change of the timing resolution.
+
+**Versions.** For launcher clips, *New version* duplicates the clip into another slot and
+continues comping the copy with the same takes and cuts; the original keeps its comp. The copy
+gets a version suffix in its title ("Lead" becomes "Lead v2"), so its comps are saved under their
+own name. For arranger clips, duplicate the clip to another track in Bitwig and comp the copy;
+the banner offers to continue with the comp. The API identifies arranger clips only by their
+track, so a copy on the same track would receive every edit as well.
 
 ## Installation
 
@@ -194,8 +205,9 @@ python3 tools/midi_copies.py run          # keep it running, e.g. as a systemd u
 - `MIDICOMP_FONT=/path/to/font.ttf`: UI font. Release builds embed Roboto; the Nix build uses Inter.
 
 The UI follows the display's scale (also when the window moves to another display). *View* in
-the toolbar, or `Ctrl+=`, `Ctrl+-` and `Ctrl+0`, adjusts it further; the factor is kept in
-`ui-scale.txt` next to the saved comps.
+the toolbar, or `Ctrl+=`, `Ctrl+-` and `Ctrl+0`, adjusts it further. *View* also sets the height
+of the take lanes (fit to the window, or fixed). Both are kept in `settings.json` next to the
+saved comps.
 
 ### Theme
 
