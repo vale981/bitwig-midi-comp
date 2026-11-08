@@ -1988,8 +1988,8 @@ public class MidiCompExtension extends ControllerExtension
          rewriteAfterLoadAt = now + 1_500_000_000L;
          return;
       }
-      // Copying it into the arranger is left to the user: copy and paste through the API do
-      // not carry the clip's automation, Bitwig's own copy and paste do.
+      // Copying it into the arranger is left to the user: copying and pasting through the API
+      // loses the clip's automation, Bitwig's own copy and paste keep it.
       lastMessage = String.format("Loaded the comp into launcher slot %d of %s; copy it over the "
          + "arranger clip", load.scene + 1, track.name().get());
       if (launcherPlay != null && launcherPlay.slot == null)
