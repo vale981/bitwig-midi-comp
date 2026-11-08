@@ -154,6 +154,12 @@ class CompView {
                   float height) const;
     void drawNotes(ImDrawList* dl, const std::vector<Note>& notes, const State& state,
                    const Layout& layout, float y, float height, int laneTake) const;
+    /**
+     * Draws control messages as step curves in the lower part of a lane: sustain (CC 64) in
+     * green, pitch bend in the accent color, other controllers muted.
+     */
+    void drawControls(ImDrawList* dl, const std::vector<ControlPoint>& controls, const State& state,
+                      const Layout& layout, float y, float height) const;
     void drawSegments(ImDrawList* dl, const State& state, const Layout& layout, float y,
                       float height, int laneTake) const;
     void handleLaneInput(ApiClient& client, const State& state, const Layout& layout, int lane,

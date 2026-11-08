@@ -156,6 +156,9 @@ final class StateJson
             .append(",\"source\":").append(Json.quote(t.source().name().toLowerCase()))
             .append(",\"length\":").append(t.length())
             .append(",\"controls\":").append(t.controls().size())
+            .append(",\"cc\":");
+         appendControls(sb, t.controls());
+         sb
             .append(",\"notes\":[");
          appendNotes(sb, t.notes(), stepSize);
          sb.append("]}");
@@ -174,6 +177,8 @@ final class StateJson
       }
       sb.append(']');
 
+      sb.append(",\"compControls\":");
+      appendControls(sb, model.renderControls());
       sb.append(",\"comp\":[");
       final List<CompModel.CompNote> comp = model.render(stepSize);
       for (int i = 0; i < comp.size(); i++)
@@ -184,6 +189,19 @@ final class StateJson
       }
       sb.append("]}");
       return sb.toString();
+   }
+
+   /** Appends control messages as ``[[x, status, data1, data2], ...]``. */
+   private static void appendControls(final StringBuilder sb, final List<ControlEvent> controls)
+   {
+      sb.append('[');
+      for (int i = 0; i < controls.size(); i++)
+      {
+         final ControlEvent c = controls.get(i);
+         sb.append(i > 0 ? "," : "").append('[').append(c.x()).append(',').append(c.status())
+            .append(',').append(c.data1()).append(',').append(c.data2()).append(']');
+      }
+      sb.append(']');
    }
 
    private static void appendNotes(

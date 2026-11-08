@@ -8,6 +8,7 @@ before the first pass, ``session`` (the default) a session with six recorded pas
 after recording, waiting for a clip to be selected in Bitwig.
 """
 import json
+import math
 import random
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,10 +33,28 @@ def take_notes(seed, base):
     return notes
 
 
+def take_cc(seed):
+    """Sustain pedal (CC 64) pressed for most of every bar, and a pitch bend on every third take."""
+    rnd = random.Random(seed * 7)
+    cc = []
+    for bar in range(LENGTH // BAR):
+        down = bar * BAR + rnd.randint(0, 40)
+        cc.append([down, 0xB0, 64, 127])
+        cc.append([down + rnd.randint(300, 470), 0xB0, 64, 0])
+    if seed % 3 == 0:
+        for i in range(64):
+            x = 2 * BAR + i * 16
+            v = 8192 + int(5000 * math.sin(i / 64 * math.pi))
+            cc.append([x, 0xE0, v & 0x7F, v >> 7])
+    return sorted(cc)
+
+
 takes = [{"id": i, "name": f"Pass {i}", "source": "arranger", "length": LENGTH,
-          "notes": take_notes(i, 60 + (i % 3))} for i in range(1, 7)]
+          "notes": take_notes(i, 60 + (i % 3)), "cc": take_cc(i), "controls": len(take_cc(i))}
+         for i in range(1, 7)]
 segments = [[0, 1024, 1], [1024, 2048, 4], [2048, 3072, 2], [3072, 3584, 6], [3584, 4096, 4]]
 comp = [n[:5] + [tid] for f, t, tid in segments for n in takes[tid - 1]["notes"] if f <= n[0] < t]
+comp_controls = [c for f, t, tid in segments for c in takes[tid - 1]["cc"] if f <= c[0] < t]
 
 if mode == "start":
     state = {"v": 1, "project": "Demo song", "stepsPerBeat": SPB, "barSteps": BAR, "length": 0,
@@ -57,7 +76,7 @@ else:  # session, recording, select
              "session": {"source": "arranger", "label": "Keys (arranger)", "available": True,
                          "recording": False, "overdub": True, "pending": False,
                          "truncated": False, "passes": 6},
-             "takes": takes, "segments": segments, "comp": comp}
+             "takes": takes, "segments": segments, "comp": comp, "compControls": comp_controls}
 if mode in ("recording", "select"):
     # Three takes, so the passes being recorded fit below them.
     state["takes"] = takes[:3]

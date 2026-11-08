@@ -17,13 +17,27 @@ struct Note {
     int take = -1;  ///< Source take for comp notes, ``-1`` for take notes.
 };
 
+/** A control message (CC, channel pressure, pitch bend) at a step. */
+struct ControlPoint {
+    int x = 0;
+    int status = 0;  ///< Status byte with the channel.
+    int data1 = 0;
+    int data2 = 0;
+
+    /** Returns the value from 0 to 1 (pitch bend: 0.5 is the center). */
+    [[nodiscard]] float value() const;
+    /** Identifies the controller: type, channel and, for CC, the number. */
+    [[nodiscard]] int controller() const;
+};
+
 /** A captured take. */
 struct Take {
     int id = 0;
     std::string name;
-    std::string source;  ///< ``"launcher"`` or ``"arranger"``.
-    int length = 0;      ///< Length in steps.
-    int controls = 0;    ///< Number of control messages (CC, pressure, pitch bend).
+    std::string source;            ///< ``"launcher"`` or ``"arranger"``.
+    int length = 0;                ///< Length in steps.
+    int controls = 0;              ///< Number of control messages (CC, pressure, pitch bend).
+    std::vector<ControlPoint> cc;  ///< The control messages, by position.
     std::vector<Note> notes;
 };
 
@@ -76,6 +90,7 @@ struct State {
     std::vector<Take> takes;
     std::vector<Segment> segments;
     std::vector<Note> comp;
+    std::vector<ControlPoint> compControls;  ///< The comp's control messages, by position.
 
     /** Returns the take with identifier ``id``, or ``nullptr``. */
     [[nodiscard]] const Take* findTake(int id) const;

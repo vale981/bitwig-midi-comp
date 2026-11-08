@@ -195,6 +195,8 @@ public class MidiCompExtension extends ControllerExtension
    }
 
    private SyncedClip syncedClip;
+   /** After a synced launch from a play start: when to set the clip's play start back to 0. */
+   private long resetPlayStartAt;
 
    /**
     * Where the synced launcher clip came from, for :meth:`backToArranger`: the arranger comp
@@ -530,6 +532,13 @@ public class MidiCompExtension extends ControllerExtension
       tickLoad();
       tickLauncherPlay();
       tickAutoReload();
+      if (resetPlayStartAt != 0 && System.nanoTime() > resetPlayStartAt)
+      {
+         // Launched: the clip starts at 0 again, also when copied into the arranger.
+         resetPlayStartAt = 0;
+         if (syncedFor(live.link()) != null && sessionAvailable())
+            targetCursor.getPlayStart().set(0);
+      }
       if (server != null)
          server.publishPlayhead(playheadJson());
 
@@ -1379,6 +1388,13 @@ public class MidiCompExtension extends ControllerExtension
       {
          if (sessionAvailable() && playing)
             step = sessionClip().clip().playingStep().get();
+         final SyncedClip synced = syncedFor(live.link());
+         if (step < 0 && synced != null && !playing)
+         {
+            final double beat = transport.playStartPosition().get() - transport.arrangerLoopStart().get();
+            if (beat >= 0 && beat < synced.loopBeats())
+               step = (int) Math.round(beat / stepSize);
+         }
          final double clipStart = arrangerClipStart();
          if (step < 0 && !Double.isNaN(clipStart) && !isRecording())
          {
@@ -1403,7 +1419,8 @@ public class MidiCompExtension extends ControllerExtension
       return String.format(java.util.Locale.ROOT,
          "{\"playing\":%b,\"step\":%d,\"stepsPerSecond\":%.3f,\"canSeek\":%b,"
             + "\"transportPlaying\":%b}",
-         playing && step >= 0, step, stepsPerSecond, !Double.isNaN(arrangerClipStart()), playing);
+         playing && step >= 0, step, stepsPerSecond,
+         !Double.isNaN(arrangerClipStart()) || syncedFor(live.link()) != null, playing);
    }
 
    /**
@@ -1422,10 +1439,12 @@ public class MidiCompExtension extends ControllerExtension
          && live.link().sceneIndex() == synced.sceneIndex() && synced.sceneIndex() < LOAD_SCENES
          && loadBank.getItemAt(0).position().get() == synced.trackPosition())
       {
-         // Comping a launcher copy: start with the comp clip at the loop start.
-         transport.playStartPosition().set(transport.arrangerLoopStart().get());
-         loadBank.getItemAt(0).clipLauncherSlotBank().getItemAt(synced.sceneIndex()).launch();
-         return Result.ok("Playing from the loop start with the comp in the launcher");
+         // Comping a launcher copy: start with the comp clip, from the play start if it lies
+         // in the loop, else from the loop start.
+         final double loopStart = transport.arrangerLoopStart().get();
+         final double offset = transport.playStartPosition().get() - loopStart;
+         launchSyncedFrom(synced, offset >= 0 && offset < synced.loopBeats() ? offset : 0);
+         return Result.ok("Playing with the comp in the launcher");
       }
       switch (action)
       {
@@ -1746,6 +1765,33 @@ public class MidiCompExtension extends ControllerExtension
       }
    }
 
+   /** Returns the synced launcher clip if ``link`` is it, else null. */
+   private SyncedClip syncedFor(final ClipRef link)
+   {
+      final SyncedClip synced = syncedClip;
+      return synced != null && link != null && link.source() == Take.Source.LAUNCHER
+         && link.trackPosition() == synced.trackPosition()
+         && link.sceneIndex() == synced.sceneIndex() ? synced : null;
+   }
+
+   /**
+    * Starts the synced launcher clip and the arrangement together at a position in the loop: the
+    * clip starts at its play start, the transport at the matching beat. A running transport is
+    * stopped first, as a playing launcher clip cannot be moved.
+    */
+   private void launchSyncedFrom(final SyncedClip synced, final double beat)
+   {
+      if (synced.sceneIndex() >= LOAD_SCENES
+         || loadBank.getItemAt(0).position().get() != synced.trackPosition())
+         return;
+      if (transport.isPlaying().get())
+         transport.stop();
+      targetCursor.getPlayStart().set(beat);
+      transport.playStartPosition().set(transport.arrangerLoopStart().get() + beat);
+      loadBank.getItemAt(0).clipLauncherSlotBank().getItemAt(synced.sceneIndex()).launch();
+      resetPlayStartAt = beat > 0 ? System.nanoTime() + 1_000_000_000L : 0;
+   }
+
    /** Returns the id of a launch quantization value, or null; logs the ids once if missing. */
    private String launchQuantizationId(final String wanted)
    {
@@ -2035,7 +2081,18 @@ public class MidiCompExtension extends ControllerExtension
       if (live.link() == null)
          return Result.fail("Start comping a clip first");
       if (live.link().source() != Take.Source.ARRANGER)
-         return Result.fail("Bitwig does not let extensions move the playhead in launcher clips");
+      {
+         final SyncedClip synced = syncedFor(live.link());
+         if (synced == null)
+            return Result.fail("Bitwig does not let extensions move the playhead in launcher "
+               + "clips (except those from Play in launcher)");
+         final double beat = Math.max(0, Math.min(step * stepSize, synced.loopBeats() - stepSize));
+         if (transport.isPlaying().get())
+            launchSyncedFrom(synced, beat);
+         else
+            transport.playStartPosition().set(transport.arrangerLoopStart().get() + beat);
+         return Result.ok("Playhead moved");
+      }
       final double clipStart = arrangerClipStart();
       if (Double.isNaN(clipStart))
          return Result.fail("Play the clip once, so MIDI Comp learns where it starts");

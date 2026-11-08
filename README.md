@@ -61,7 +61,9 @@ Two parts:
    drag across the comp lane to make a range silent. The clip is rewritten as you edit, and a
    line shows the playhead. For arranger clips, click the ruler to move it (snapped to the grid,
    `Shift` for any position); this works once the clip has played, so the companion knows where
-   the clip starts. Each new pass is added as a lane. While the comp still uses a single take
+   the clip starts. In a launcher clip from *Play in launcher*, moving the playhead restarts the
+   clip and the arrangement together at that position (Bitwig cannot move a playing launcher
+   clip). Each new pass is added as a lane. While the comp still uses a single take
    throughout, it switches to the new pass, as with Bitwig's audio takes; once takes are cut
    together, the comp stays as it is.
 
@@ -71,7 +73,8 @@ Two parts:
    The editor writes notes only; the extension API cannot write CC into clips. Control messages
    played while recording (CC such as the hi-hat pedal or sustain, channel pressure, pitch bend)
    are kept with each take, and a comp takes each cut's messages, starting with the take's
-   controller values at the cut. *Load into Bitwig* writes the comp with them as a MIDI file and
+   controller values at the cut. The lanes show them as curves along the bottom: sustain in
+   green, pitch bend in the accent color, other controllers muted. *Load into Bitwig* writes the comp with them as a MIDI file and
    loads it: launcher comps directly into their slot, arranger comps into a free launcher slot of
    the comp track, from where you copy them over the arranger clip (copy and paste in Bitwig, or
    drag). The extension cannot take this step itself: copy and paste through the API lose the

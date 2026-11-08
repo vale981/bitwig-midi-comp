@@ -16,6 +16,18 @@ std::optional<std::string> optionalString(const json& j, const char* key) {
     return it->get<std::string>();
 }
 
+// Control arrays are [x, status, data1, data2].
+std::vector<ControlPoint> parseControls(const json& array) {
+    std::vector<ControlPoint> points;
+    points.reserve(array.size());
+    for (const auto& c : array)
+        points.push_back(ControlPoint{.x = c.at(0).get<int>(),
+                                      .status = c.at(1).get<int>(),
+                                      .data1 = c.at(2).get<int>(),
+                                      .data2 = c.at(3).get<int>()});
+    return points;
+}
+
 // Note arrays are [x, key, durationSteps, velocity, muted, takeId].
 std::vector<Note> parseNotes(const json& array) {
     std::vector<Note> notes;
@@ -34,6 +46,21 @@ std::vector<Note> parseNotes(const json& array) {
 }
 
 }  // namespace
+
+float ControlPoint::value() const {
+    switch (status & 0xF0) {
+    case 0xE0:
+        return static_cast<float>(data1 | data2 << 7) / 16383.0f;
+    case 0xD0:
+        return static_cast<float>(data1) / 127.0f;
+    default:
+        return static_cast<float>(data2) / 127.0f;
+    }
+}
+
+int ControlPoint::controller() const {
+    return (status & 0xF0) == 0xB0 ? status << 8 | data1 : status << 8 | 0xFF;
+}
 
 const Take* State::findTake(const int id) const {
     const auto it = std::ranges::find(takes, id, &Take::id);
@@ -124,6 +151,7 @@ State parseState(const std::string_view text) {
             .source = t.at("source").get<std::string>(),
             .length = t.at("length").get<int>(),
             .controls = t.value("controls", 0),
+            .cc = t.contains("cc") ? parseControls(t.at("cc")) : std::vector<ControlPoint>{},
             .notes = parseNotes(t.at("notes")),
         });
     }
@@ -139,6 +167,8 @@ State parseState(const std::string_view text) {
     }
 
     s.comp = parseNotes(j.at("comp"));
+    if (const auto it = j.find("compControls"); it != j.end())
+        s.compControls = parseControls(*it);
     if (const auto it = j.find("log"); it != j.end() && it->is_array())
         s.log = it->get<std::vector<std::string>>();
     return s;

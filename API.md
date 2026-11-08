@@ -90,9 +90,11 @@ State document:
   "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [
     {"id": 1, "name": "Pass 1", "source": "arranger", "length": 2048, "controls": 12,
+     "cc": [[x, status, data1, data2], ...],
      "notes": [[x, key, durationSteps, velocity, muted, -1], ...]}
   ],
   "segments": [[from, to, takeId], ...],
+  "compControls": [[x, status, data1, data2], ...],   // the comp's CC, pressure, pitch bend
   "comp": [[x, key, durationSteps, velocity, muted, takeId], ...]
 }
 ```

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <ctime>
+#include <map>
 #include <string>
 #include <utility>
 
@@ -821,6 +822,7 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
         drawGrid(dl, state, layout, rulerHeight, compHeight);
         drawSegments(dl, state, layout, rulerHeight, compHeight, -1);
         drawNotes(dl, state.comp, state, layout, rulerHeight, compHeight, -1);
+        drawControls(dl, state.compControls, state, layout, rulerHeight, compHeight);
         drawPlayhead(dl, state, layout, 0.0f, topHeight, true);
         handleRulerInput(client, state, layout, rulerHeight);
         handleLaneInput(client, state, layout, -1, rulerHeight, compHeight);
@@ -865,6 +867,7 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
             drawGrid(dl, state, layout, y, takeHeight);
             drawSegments(dl, state, layout, y, takeHeight, take.id);
             drawNotes(dl, take.notes, state, layout, y, takeHeight, take.id);
+            drawControls(dl, take.cc, state, layout, y, takeHeight);
             handleLaneInput(client, state, layout, take.id, y, takeHeight);
             dl->AddLine(
                 ImVec2(layout.origin.x, layout.origin.y + y + takeHeight - 1.0f),
@@ -971,6 +974,47 @@ void CompView::handleRulerInput(ApiClient& client, const State& state, const Lay
         if (const auto cell = snapRange(step, step, gridSteps(state), state.length))
             step = cell->first;
     client.send("seek", {{"step", str(step)}});
+}
+
+void CompView::drawControls(ImDrawList* dl, const std::vector<ControlPoint>& controls,
+                            const State& state, const Layout& layout, const float y,
+                            const float height) const {
+    if (controls.empty())
+        return;
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    const float bottom = layout.origin.y + y + height - 3.0f * scale;
+    const float band = std::min(height * 0.3f, 40.0f * scale);
+    const float left = layout.origin.x + layout.visibleLeft;
+    const float right = layout.origin.x + layout.visibleRight;
+    const auto px = [&](const int step) {
+        return layout.origin.x + layout.headerWidth + static_cast<float>(step) * layout.pxPerStep;
+    };
+
+    std::map<int, std::vector<const ControlPoint*>> byController;
+    for (const auto& c : controls)
+        byController[c.controller()].push_back(&c);
+    for (const auto& [controller, points] : byController) {
+        const int type = (controller >> 8) & 0xF0;
+        const int number = controller & 0xFF;
+        const ImU32 color = withAlpha(type == 0xE0                   ? palette_.accent
+                                      : type == 0xB0 && number == 64 ? palette_.live
+                                                                     : palette_.mutedText,
+                                      0.8f);
+        // A step curve: each value holds until the next message, the last one to the end.
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            const float x0 = px(points[i]->x);
+            const float x1 = i + 1 < points.size() ? px(points[i + 1]->x) : px(state.length);
+            if (x1 < left || x0 > right)
+                continue;
+            const float v = bottom - points[i]->value() * band;
+            dl->AddLine(ImVec2(std::max(x0, left), v), ImVec2(std::min(x1, right), v), color,
+                        1.2f * scale);
+            if (i + 1 < points.size() && x1 >= left && x1 <= right) {
+                const float next = bottom - points[i + 1]->value() * band;
+                dl->AddLine(ImVec2(x1, v), ImVec2(x1, next), color, 1.2f * scale);
+            }
+        }
+    }
 }
 
 void CompView::drawPlayhead(ImDrawList* dl, const State& state, const Layout& layout, const float y,
