@@ -52,7 +52,7 @@ Two parts:
    While recording, the passes appear as provisional lanes (red notes, from the keyboard), and
    are replaced by the assembled takes when recording ends. Without a keyboard selected, the
    recording becomes a single take. Bitwig and the companion both need the keyboard (see
-   *Sharing the keyboard* below). *Log* shows what the extension saw (recording, loop wraps,
+   [Sharing a MIDI controller](#sharing-a-midi-controller) below). *Log* shows what the extension saw (recording, loop wraps,
    assembled takes).
 
    ![Passes 4 and 5 being recorded](docs/screenshots/recording.png)
@@ -250,16 +250,19 @@ whether Bitwig's MIDI clock arrives. Its dot turns red while a step fails.
    second one named "MIDI Comp Clock". The companion reads tempo and phase from it; where
    playback starts comes from the extension, as Bitwig's clock does not send song positions.
 
-### Sharing the keyboard
+### Sharing a MIDI controller
+
+The companion reads the controller you record with (keyboard, e-drums, ...) while Bitwig uses
+it too.
 
 - **macOS**: CoreMIDI devices serve several programs; nothing to do.
-- **Linux**: Bitwig opens raw MIDI devices exclusively, and once the companion reads the keyboard
-  through the ALSA sequencer, the kernel holds the keyboard's raw device and Bitwig reports it as
+- **Linux**: Bitwig opens raw MIDI devices exclusively, and once the companion reads the
+  controller through the ALSA sequencer, the kernel holds its raw device and Bitwig reports it as
   busy. The fix is a copy of each device on a virtual raw MIDI device (`snd-virmidi`): Bitwig
   uses the copy, the companion reads the device itself. See [MIDI copies on
   Linux](#midi-copies-on-linux).
 - **Windows**: classic MIDI drivers allow one program per device. Use a driver with
-  multi-client support (Windows MIDI Services) or route the keyboard through a loopback port
+  multi-client support (Windows MIDI Services) or route the controller through a loopback port
   for Bitwig.
 
 ### MIDI copies on Linux
