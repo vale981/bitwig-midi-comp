@@ -208,6 +208,8 @@ public class MidiCompExtension extends ControllerExtension
    }
 
    private LauncherOrigin launcherOrigin;
+   /** After Back to arranger: load the merged comp into a launcher slot from this time on. */
+   private long loadAfterBackAt;
    private long syncedRevision;
    /** The launcher session :meth:`tickAutoReload` follows; a new one resets its baseline. */
    private ClipRef reloadLink;
@@ -532,6 +534,15 @@ public class MidiCompExtension extends ControllerExtension
       tickLoad();
       tickLauncherPlay();
       tickAutoReload();
+      if (loadAfterBackAt != 0 && System.nanoTime() > loadAfterBackAt && pendingStart == null
+         && carryAfterStart == null)
+      {
+         // The arranger clip has the merged notes; its controllers come with a clip to copy.
+         loadAfterBackAt = 0;
+         if (live.link() != null && live.link().source() == Take.Source.ARRANGER)
+            log("Back to arranger: " + loadIntoBitwig().message()
+               + "; copy it over the arranger clip for the controllers");
+      }
       if (resetPlayStartAt != 0 && System.nanoTime() > resetPlayStartAt)
       {
          // Launched: the clip starts at 0 again, also when copied into the arranger.
@@ -1698,6 +1709,8 @@ public class MidiCompExtension extends ControllerExtension
       final Result started = startSession("arranger");
       if (!started.ok())
          carryAfterStart = null;
+      else
+         loadAfterBackAt = System.nanoTime() + 1_000_000_000L; // after the old clips are removed
       log("Back to arranger: " + started.message());
       return started;
    }

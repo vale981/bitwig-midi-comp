@@ -151,10 +151,10 @@ which Bitwig imports as clip automation.
    arrow keys start and move playback, clip and arrangement together.
 4. **Back to the arranger.** *Back to arranger* merges the edits into the full comp, returns the
    track to the arrangement, removes the launcher clips MIDI Comp made and continues the
-   session in the arranger clip (select it first), which gets the comp's notes. For its
-   controllers, press *Load into Bitwig*: the comp goes into a free launcher slot of the track,
-   and you copy that clip over the arranger clip in Bitwig (copy and paste, or drag). This copy
-   is manual, because copy and paste through the API lose the automation.
+   session in the arranger clip (select it first), which gets the comp's notes. It then loads
+   the whole comp with its controllers into a free launcher slot of the track (as *Load into
+   Bitwig* does); copy that clip over the arranger clip in Bitwig (copy and paste, or drag).
+   This copy is manual, because copy and paste through the API lose the automation.
 
 Comps of launcher clips need no extra steps: their clip is replaced with the comp and its
 controllers after each edit. *Load into Bitwig* does the same on demand.
