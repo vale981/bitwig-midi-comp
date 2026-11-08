@@ -1086,7 +1086,7 @@ void CompView::drawPreviewHeader(const State& state, const PreviewPass& pass, co
 }
 
 void CompView::drawTakeHeader(ApiClient& client, const State& state, const Take& take,
-                              const float y, const float height) const {
+                              const float y, const float height) {
     const float scale = ImGui::GetFontSize() / 13.0f;
     const float scrollX = ImGui::GetScrollX();
     const ImVec2 origin(ImGui::GetWindowPos().x - scrollX,
@@ -1101,9 +1101,41 @@ void CompView::drawTakeHeader(ApiClient& client, const State& state, const Take&
                       palette_.take(take.id));
 
     const int index = state.takeIndex(take.id);
-    const std::string title = str(index + 1) + "  " + take.name;
+    ImGui::PushID(take.id);
+    if (renamingTake_ == take.id) {
+        // Enter keeps the name, Escape or clicking elsewhere without a change cancels.
+        ImGui::SetCursorPos(ImVec2(scrollX + 8.0f * scale, y + 3.0f * scale));
+        ImGui::SetNextItemWidth(174.0f * scale);
+        if (std::exchange(renameFocus_, false))
+            ImGui::SetKeyboardFocusHere();
+        const bool entered = ImGui::InputText(
+            "##takeName", takeNameBuffer_.data(), takeNameBuffer_.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        if (entered || ImGui::IsItemDeactivatedAfterEdit()) {
+            if (takeNameBuffer_[0] != '\0' && take.name != takeNameBuffer_.data())
+                client.send("renameTake",
+                            {{"take", str(take.id)}, {"name", takeNameBuffer_.data()}});
+            renamingTake_ = -1;
+        } else if (ImGui::IsItemDeactivated() || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            renamingTake_ = -1;
+        }
+    } else {
+        const std::string title = str(index + 1) + "  " + take.name;
+        dl->PushClipRect(ImVec2(hx, top), ImVec2(hx + 186.0f * scale, top + height), true);
+        dl->AddText(ImVec2(hx + 10.0f * scale, top + 6.0f * scale), palette_.text, title.c_str());
+        dl->PopClipRect();
+        ImGui::SetCursorPos(ImVec2(scrollX + 8.0f * scale, y + 4.0f * scale));
+        ImGui::InvisibleButton("name", ImVec2(174.0f * scale, ImGui::GetTextLineHeight()));
+        ImGui::SetItemTooltip("Double-click to rename");
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            renamingTake_ = take.id;
+            renameFocus_ = true;
+            takeNameBuffer_.fill('\0');
+            take.name.copy(takeNameBuffer_.data(), takeNameBuffer_.size() - 1);
+        }
+    }
+    ImGui::PopID();
     dl->PushClipRect(ImVec2(hx, top), ImVec2(hx + 186.0f * scale, top + height), true);
-    dl->AddText(ImVec2(hx + 10.0f * scale, top + 6.0f * scale), palette_.text, title.c_str());
     dl->AddText(ImVec2(hx + 10.0f * scale, top + 22.0f * scale), palette_.mutedText,
                 (take.source + ", " + str(static_cast<int>(take.notes.size())) + " notes").c_str());
     dl->PopClipRect();

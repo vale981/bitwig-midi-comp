@@ -72,7 +72,8 @@ be recorded again and added as another take.
 
 **Editing keys** (pointer over the lanes): `1`-`9` use the n-th take for the grid cell under the
 pointer, `0` or `Delete` clears it, `Ctrl+Z` undoes the last edit, `Ctrl`+wheel zooms,
-`Shift`+wheel scrolls. Take lanes scroll vertically below the fixed comp lane.
+`Shift`+wheel scrolls. Take lanes scroll vertically below the fixed comp lane. Double-click a
+take's name to rename it (`Enter` keeps the name, `Escape` cancels).
 
 **Overwriting.** The comp clip is always overwritten with the comp: edits made to it directly in
 Bitwig are replaced at the next comp change, and recorded passes are replaced once recording

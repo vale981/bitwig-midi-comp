@@ -136,4 +136,15 @@ class CompModelTest
       assertTrue(json.contains("\"arrangerSel\":null"), json);
       assertTrue(json.contains("\"session\":null"), json);
    }
+
+   @Test
+   void takesCanBeRenamed()
+   {
+      final CompModel model = new CompModel();
+      final Take take = model.addTake("Pass 1", Take.Source.ARRANGER, 512, List.of(note(0, 60, 0.5)));
+      assertTrue(model.renameTake(take.id(), "Chorus"));
+      assertEquals("Chorus", model.takes().get(0).name());
+      assertEquals(take.notes(), model.takes().get(0).notes());
+      assertFalse(model.renameTake(take.id() + 100, "Nope"));
+   }
 }

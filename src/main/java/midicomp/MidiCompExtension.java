@@ -432,6 +432,7 @@ public class MidiCompExtension extends ControllerExtension
          case "addTake" -> addTake(p.get("source"));
          case "removeTake" -> model.removeTake(intParam(p, "take"))
             ? Result.ok("Take removed") : Result.fail("No such take");
+         case "renameTake" -> renameTake(intParam(p, "take"), p.getOrDefault("name", ""));
          case "assign" -> assign(intParam(p, "from"), intParam(p, "to"), intParam(p, "take"));
          case "clear" -> assign(intParam(p, "from"), intParam(p, "to"), -1);
          case "useTake" -> assign(0, model.length(), intParam(p, "take"));
@@ -765,6 +766,18 @@ public class MidiCompExtension extends ControllerExtension
       model.clear();
       history.clear();
       return Result.ok("Finished comping " + old.label());
+   }
+
+   /** Renames a take; names are trimmed to at most 60 characters. */
+   private Result renameTake(final int id, final String name)
+   {
+      String clean = name.strip();
+      if (clean.isEmpty())
+         return Result.fail("A take needs a name");
+      if (clean.length() > 60)
+         clean = clean.substring(0, 60);
+      return model.renameTake(id, clean) ? Result.ok("Renamed the take to " + clean)
+         : Result.fail("No such take");
    }
 
    /**

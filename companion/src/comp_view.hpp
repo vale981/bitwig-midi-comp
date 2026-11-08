@@ -147,8 +147,9 @@ class CompView {
     void handleLaneInput(ApiClient& client, const State& state, const Layout& layout, int lane,
                          float y, float height);
     void handleKeys(ApiClient& client, const State& state, const Layout& layout);
+    /** Draws a take's header; double-clicking the name renames the take. */
     void drawTakeHeader(ApiClient& client, const State& state, const Take& take, float y,
-                        float height) const;
+                        float height);
     void drawPreviewHeader(const State& state, const PreviewPass& pass, float y,
                            float height) const;
     /**
@@ -239,7 +240,10 @@ class CompView {
     float scrollX_ = 0.0f;                   ///< Horizontal scroll shared by both lane areas.
     std::optional<float> requestedScrollX_;  ///< Scroll position to apply next frame.
     bool redraw_ = false;                    ///< Another frame is needed to settle the layout.
-    bool inputBlocked_ = false;              ///< A clip must be selected in Bitwig before editing.
+    bool inputBlocked_ = false;
+    int renamingTake_ = -1;                  ///< Take whose name is being edited, or -1.
+    bool renameFocus_ = false;               ///< Focus the name field on the next frame.
+    std::array<char, 64> takeNameBuffer_{};  ///< A clip must be selected in Bitwig before editing.
     int laneCount_ = -1;                     ///< Lanes shown last frame, ``-1`` outside a session.
     bool scrollToBottom_ = false;            ///< Scroll the take area to the newest lane.
 };

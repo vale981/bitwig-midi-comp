@@ -115,6 +115,7 @@ Bitwig did not process the command within 5 s.
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
 | `addTake`    | `source=launcher\|arranger` | Copy the selected clip's notes as a new take. |
 | `removeTake` | `take`                      | Remove a take and its segments. |
+| `renameTake` | `take`, `name`              | Rename a take (trimmed, at most 60 characters; not part of the edit undo). |
 | `assign`     | `take`, `from`, `to`        | Use `take` for `[from, to)`. |
 | `clear`      | `from`, `to`                | Make `[from, to)` silent. |
 | `useTake`    | `take`                      | Use `take` for the whole comp. |

@@ -111,6 +111,30 @@ final class CompModel
    }
 
    /**
+    * Renames a take. Not an undoable edit: undo concerns the cuts.
+    *
+    * Args:
+    *    id: take identifier.
+    *    name: the new name.
+    *
+    * Returns:
+    *    Whether the take existed.
+    */
+   boolean renameTake(final int id, final String name)
+   {
+      for (int i = 0; i < takes.size(); i++)
+      {
+         final Take t = takes.get(i);
+         if (t.id() == id)
+         {
+            takes.set(i, new Take(t.id(), name, t.source(), t.length(), t.notes()));
+            return true;
+         }
+      }
+      return false;
+   }
+
+   /**
     * Assigns ``[from, to)`` to a take, or clears it.
     *
     * Args:
