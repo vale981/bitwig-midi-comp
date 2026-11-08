@@ -150,6 +150,28 @@ class CompView {
     void drawSessionStatus(const State& state);
     void drawLanes(ApiClient& client, const State& state);
     void drawRuler(ImDrawList* dl, const State& state, const Layout& layout, float y) const;
+    enum class Check { Unknown, Ok, Problem };
+    /** The preview setup, checked: what to connect in Bitwig and whether it works. */
+    struct PreviewChecks {
+        PreviewStatus status;
+        Check port = Check::Unknown;
+        Check track = Check::Unknown;
+        Check clock = Check::Unknown;
+        std::string portText;
+        std::string trackText;
+        std::string clockText;
+    };
+    [[nodiscard]] PreviewChecks previewChecks(const State* state) const;
+    /** Draws the MIDI button and its popup: keyboard choice and the preview setup. */
+    void drawMidiButton(const State* state);
+    /** Draws the preview's setup checklist and its lead. */
+    void drawPreviewSetup(const PreviewChecks& checks);
+    /** Draws the clip menu: add takes, load into Bitwig, new version, launcher, revert. */
+    void drawClipMenu(ApiClient& client, const State& state);
+    /** Returns whether a keyboard note arrived just now (and keeps redrawing while so). */
+    bool keyboardLit();
+    /** Draws the preview toggle (arranger sessions), with the timing in its tooltip. */
+    void drawPreviewButton(ApiClient& client, const Session& session);
     /** Draws the play/stop button. */
     void drawTransportButton(ApiClient& client);
     /** Space: play or stop; Left, Right, Home: move the playhead. */

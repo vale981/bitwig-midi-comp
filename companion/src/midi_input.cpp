@@ -32,7 +32,8 @@ std::string lower(std::string_view text) {
 bool isVirtual(std::string_view name) {
     const std::string l = lower(name);
     return l.find("midi through") != std::string::npos || l.find("rtmidi") != std::string::npos ||
-           l.find("virmidi") != std::string::npos || l.find("bitwig") != std::string::npos;
+           l.find("virmidi") != std::string::npos || l.find("bitwig") != std::string::npos ||
+           l.find("midi comp") != std::string::npos || l.find("loopmidi") != std::string::npos;
 }
 
 }  // namespace

@@ -71,6 +71,11 @@ std::optional<Playhead> parsePlayhead(const std::string_view json) {
             .stepSize = j.value("stepSize", 0.0),
             .playStart = j.contains("playStart") ? std::optional(j.at("playStart").get<double>())
                                                  : std::nullopt,
+            .noteInput = j.contains("noteInput") ? std::optional(j.at("noteInput").get<bool>())
+                                                 : std::nullopt,
+            .previewHeard = j.contains("previewHeard")
+                                ? std::optional(j.at("previewHeard").get<int>())
+                                : std::nullopt,
             .loop = j.contains("loop") ? std::optional(std::pair(j.at("loop").at(0).get<double>(),
                                                                  j.at("loop").at(1).get<double>()))
                                        : std::nullopt,

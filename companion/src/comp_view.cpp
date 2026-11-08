@@ -190,11 +190,9 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
     ImGui::SetItemTooltip("%s", client.connectionDetail().c_str());
     ImGui::SameLine();
 
-    const bool haveLauncher = state != nullptr && state->launcherSel.has_value();
-    const bool haveArranger = state != nullptr && state->arrangerSel.has_value();
-
-    if (state == nullptr || !state->session) {
-    } else {
+    // First row: transport, recording, preview and the session's state; setup on the right.
+    const bool comping = state != nullptr && state->session.has_value();
+    if (comping) {
         const Session& session = *state->session;
         drawTransportButton(client);
         ImGui::SameLine();
@@ -231,83 +229,46 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
                 "On: record one take and stop.\nOff: keep recording; every pass of "
                 "the loop becomes a take until you press Stop.");
         }
+        if (session.source == "arranger") {
+            ImGui::SameLine();
+            drawPreviewButton(client, session);
+        }
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
+        drawSessionStatus(*state);
+    } else {
+        ImGui::TextDisabled("Not comping");
+    }
 
-        if (ImGui::Button("Add take..."))
-            ImGui::OpenPopup("addTake");
-        ImGui::SetItemTooltip("Copy the notes of a clip recorded elsewhere as a new take");
-        if (ImGui::BeginPopup("addTake")) {
-            const std::string launcherItem =
-                "Selected launcher clip" + (haveLauncher ? ": " + *state->launcherSel : "");
-            if (ImGui::MenuItem(launcherItem.c_str(), nullptr, false, haveLauncher))
-                client.send("addTake", {{"source", "launcher"}});
-            const std::string arrangerItem =
-                "Selected arranger clip" + (haveArranger ? ": " + *state->arrangerSel : "");
-            if (ImGui::MenuItem(arrangerItem.c_str(), nullptr, false, haveArranger))
-                client.send("addTake", {{"source", "arranger"}});
-            ImGui::EndPopup();
-        }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!state->canRevert);
-        if (ImGui::Button("Revert"))
-            client.send("revert");
-        ImGui::SetItemTooltip("Restore the clip as it was before comping and finish");
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (versionSaved_.exchange(false))
-            client.send("newVersion");
-        const bool launcherClip = session.source == "launcher";
-        ImGui::BeginDisabled(session.recording || versionRequested_ || !launcherClip);
-        if (ImGui::Button("New version")) {
-            // Save the comp first, so the copy can also be continued by hand.
-            versionRequested_ = true;
-            client.fetch("export", [this, id = sessionId_,
-                                    name = compName_](std::optional<std::string> doc) {
-                if (doc && store_ != nullptr && store_->save(id, *doc, unixNow(), name))
-                    storeChanged_ = true;
-                versionSaved_ = true;
-            });
-        }
-        ImGui::SetItemTooltip(
-            "%s", launcherClip
-                      ? "Duplicate the clip into another slot and continue comping the copy with "
-                        "the same takes and cuts.\nThe original keeps its comp; the copy gets a "
-                        "version suffix (\"Lead v2\")."
-                      : "Launcher clips only. For an arranger clip, duplicate it to another track "
-                        "in Bitwig\nand comp the copy; the companion offers to continue with "
-                        "this comp.\n(On the same track, the extension cannot tell the clips "
-                        "apart.)");
-        ImGui::EndDisabled();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const auto buttonWidth = [&style](const char* label) {
+        return ImGui::CalcTextSize(label).x + 2.0f * style.FramePadding.x;
+    };
+    float group = h * 0.7f + buttonWidth("MIDI") + buttonWidth("View") + buttonWidth("Hide log") +
+                  3.0f * style.ItemSpacing.x;
+    if (comping)
+        group += buttonWidth("Done") + style.ItemSpacing.x;
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(
+        std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - group));
+    drawMidiButton(state);
+    ImGui::SameLine();
+    drawViewMenu();
+    ImGui::SameLine();
+    if (ImGui::Button(showLog_ ? "Hide log" : "Log", ImVec2(buttonWidth("Hide log"), 0)))
+        showLog_ = !showLog_;
+    ImGui::SetItemTooltip("Recent extension events (recording, loop passes)");
+    if (comping) {
         ImGui::SameLine();
         if (ImGui::Button("Done"))
             client.send("end");
         ImGui::SetItemTooltip("Finish comping; the clip keeps the comp");
     }
-    if (state != nullptr && state->session)
-        ImGui::SameLine();
-    drawMidiPicker();
-    ImGui::SameLine();
-    drawViewMenu();
-    ImGui::SameLine();
-    const float logWidth =
-        ImGui::CalcTextSize("Hide log").x + 2.0f * ImGui::GetStyle().FramePadding.x;
-    if (ImGui::Button(showLog_ ? "Hide log" : "Log", ImVec2(logWidth, 0)))
-        showLog_ = !showLog_;
-    ImGui::SetItemTooltip("Recent extension events (recording, loop passes)");
-
-    // Status last: its length changes, and nothing after it on this row can move.
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    if (state != nullptr && state->session)
-        drawSessionStatus(*state);
-    else
-        ImGui::TextDisabled("Not comping");
 
     // Second row: editing controls (only useful while comping) and the last message.
-    const bool comping = state != nullptr && state->session.has_value();
+    if (versionSaved_.exchange(false))
+        client.send("newVersion");
     if (comping) {
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5.0f);
         const auto current =
@@ -345,65 +306,19 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::SetItemTooltip("Restore a saved comp of this project");
         drawSavedComps(client, *state);
         ImGui::SameLine();
-        ImGui::BeginDisabled(state->session->recording);
-        if (ImGui::Button("Load into Bitwig"))
-            client.send("loadIntoBitwig");
-        ImGui::SetItemTooltip(
-            "Write the comp as a MIDI file, with its CC (hi-hat pedal, sustain, pitch bend), and "
-            "load it into Bitwig:\ninto the comp clip for launcher clips, into a free launcher "
-            "slot of the comp track for arranger clips\n(copy it over the arranger clip from "
-            "there). The editor writes notes only; this is how CC gets into the clip.");
+        drawClipMenu(client, *state);
         if (state->session->fromArranger) {
             ImGui::SameLine();
+            ImGui::BeginDisabled(state->session->recording);
             if (ImGui::Button("Back to arranger"))
                 client.send("backToArranger");
+            ImGui::EndDisabled();
             ImGui::SetItemTooltip(
                 "Return the track to the arrangement and continue comping the arranger clip,\n"
                 "with the edits made here merged into the full comp. Select the comp clip in the "
                 "arranger first.\nThe whole comp with its CC is then loaded into a free launcher "
                 "slot: copy that clip over the arranger clip.");
         }
-        if (state->session->source == "arranger" && previewPlayer_ != nullptr) {
-            ImGui::SameLine();
-            const bool auditioning = state->session->auditioning;
-            if (auditioning)
-                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(
-                                                           withAlpha(palette_.live, 0.5f)));
-            ImGui::BeginDisabled(!previewPlayer_->available());
-            if (ImGui::Button(auditioning ? "End preview" : "Preview"))
-                client.send("audition", {{"on", auditioning ? "false" : "true"}});
-            ImGui::EndDisabled();
-            if (auditioning)
-                ImGui::PopStyleColor();
-            std::string status;
-            if (!previewPlayer_->available())
-                status = "\n\n" + previewPlayer_->error();
-            else if (auditioning) {
-                const std::string timing = previewPlayer_->timingSource();
-                status = "\n\nTiming: " + (timing.empty() ? "waiting for playback" : timing) +
-                         ", " + std::to_string(previewPlayer_->sent()) + " messages sent";
-            }
-            ImGui::SetItemTooltip(
-                "Prototype: play the comp, with its controllers, as live MIDI into the comp track\n"
-                "while the clip stays empty, so edits are heard at once. Ending the preview "
-                "writes\n"
-                "the comp back. The companion's port \"MIDI Comp / Preview\" must be the track's "
-                "input\n(on Linux through its VirMIDI copy); Bitwig's MIDI clock sent to that "
-                "device improves the timing.%s",
-                status.c_str());
-        }
-        if (state->session->source == "arranger") {
-            ImGui::SameLine();
-            if (ImGui::Button("Play in launcher"))
-                client.send("playInLauncher");
-            ImGui::SetItemTooltip(
-                "Play the comp from the clip launcher while the other tracks play the arrangement:"
-                "\nloads the loop region as its own launcher clip, continues the session there "
-                "and launches it\nat the next loop start. Edits then go to that clip, which is "
-                "reloaded with its automation\nshortly after each change. Copy it into the "
-                "arranger at the loop start when done.");
-        }
-        ImGui::EndDisabled();
     }
 
     std::optional<Reply> message = client.lastReply();
@@ -426,6 +341,209 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
     if (state != nullptr && !ImGui::GetIO().WantTextInput &&
         ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z) && state->canUndoEdit)
         client.send("undoEdit");
+}
+
+void CompView::drawClipMenu(ApiClient& client, const State& state) {
+    const Session& session = *state.session;
+    if (ImGui::Button("Clip..."))
+        ImGui::OpenPopup("clipMenu");
+    ImGui::SetItemTooltip("Add takes, load the comp into Bitwig, versions, revert");
+    if (!ImGui::BeginPopup("clipMenu"))
+        return;
+
+    const bool haveLauncher = state.launcherSel.has_value();
+    const bool haveArranger = state.arrangerSel.has_value();
+    ImGui::TextDisabled("Add a take: copy the notes of a clip recorded elsewhere");
+    const std::string launcherItem =
+        "Add selected launcher clip" + (haveLauncher ? ": " + *state.launcherSel : "");
+    if (ImGui::MenuItem(launcherItem.c_str(), nullptr, false, haveLauncher))
+        client.send("addTake", {{"source", "launcher"}});
+    const std::string arrangerItem =
+        "Add selected arranger clip" + (haveArranger ? ": " + *state.arrangerSel : "");
+    if (ImGui::MenuItem(arrangerItem.c_str(), nullptr, false, haveArranger))
+        client.send("addTake", {{"source", "arranger"}});
+
+    ImGui::Separator();
+    const bool idle = !session.recording;
+    if (ImGui::MenuItem("Load into Bitwig", nullptr, false, idle))
+        client.send("loadIntoBitwig");
+    ImGui::SetItemTooltip(
+        "Write the comp as a MIDI file, with its CC (hi-hat pedal, sustain, pitch bend), and "
+        "load it into Bitwig:\ninto the comp clip for launcher clips, into a free launcher "
+        "slot of the comp track for arranger clips\n(copy it over the arranger clip from "
+        "there). The editor writes notes only; this is how CC gets into the clip.");
+
+    const bool launcherClip = session.source == "launcher";
+    if (ImGui::MenuItem("New version", nullptr, false,
+                        idle && launcherClip && !versionRequested_)) {
+        // Save the comp first, so the copy can also be continued by hand.
+        versionRequested_ = true;
+        client.fetch("export",
+                     [this, id = sessionId_, name = compName_](std::optional<std::string> doc) {
+                         if (doc && store_ != nullptr && store_->save(id, *doc, unixNow(), name))
+                             storeChanged_ = true;
+                         versionSaved_ = true;
+                     });
+    }
+    ImGui::SetItemTooltip(
+        "%s", launcherClip
+                  ? "Duplicate the clip into another slot and continue comping the copy with "
+                    "the same takes and cuts.\nThe original keeps its comp; the copy gets a "
+                    "version suffix (\"Lead v2\")."
+                  : "Launcher clips only. For an arranger clip, duplicate it to another track "
+                    "in Bitwig\nand comp the copy; the companion offers to continue with "
+                    "this comp.\n(On the same track, the extension cannot tell the clips "
+                    "apart.)");
+
+    if (session.source == "arranger") {
+        if (ImGui::MenuItem("Play in launcher", nullptr, false, idle))
+            client.send("playInLauncher");
+        ImGui::SetItemTooltip(
+            "Fallback where Preview is not set up.\n"
+            "Play the comp from the clip launcher while the other tracks play the arrangement:"
+            "\nloads the loop region as its own launcher clip, continues the session there "
+            "and launches it\nat the next loop start. Edits then go to that clip, which is "
+            "reloaded with its automation\nshortly after each change. Back to arranger "
+            "returns to the arrangement.");
+    }
+
+    ImGui::Separator();
+    if (ImGui::MenuItem("Revert", nullptr, false, state.canRevert))
+        client.send("revert");
+    ImGui::SetItemTooltip("Restore the clip as it was before comping and finish");
+    ImGui::EndPopup();
+}
+
+bool CompView::keyboardLit() {
+    if (midi_ == nullptr || midi_->portName().empty() || midi_->lastNoteMicros() == 0)
+        return false;
+    const double age = static_cast<double>(monotonicMicros() - midi_->lastNoteMicros()) * 1e-6;
+    if (age >= 0.15)
+        return false;
+    redraw_ = true;
+    return true;
+}
+
+void CompView::drawMidiButton(const State* state) {
+    // The dot: lit by keyboard notes, red or yellow while something is not set up.
+    const PreviewChecks checks = previewChecks(state);
+    const bool noKeyboard = midi_ != nullptr && midi_->portName().empty();
+    const ImU32 color = keyboardLit() ? palette_.live
+                        : checks.port == Check::Problem || checks.track == Check::Problem
+                            ? palette_.error
+                        : noKeyboard ? palette_.warning
+                                     : palette_.mutedText;
+    const float h = ImGui::GetFrameHeight();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + h * 0.35f, p.y + h * 0.5f), h * 0.18f,
+                                                color);
+    ImGui::Dummy(ImVec2(h * 0.7f, h));
+    ImGui::SameLine(0.0f, 0.0f);
+    if (ImGui::Button("MIDI"))
+        ImGui::OpenPopup("midiSetup");
+    const std::string keyboard = midi_ != nullptr && !midi_->portName().empty()
+                                     ? portKey(midi_->portName())
+                                 : !demoKeyboard_.empty() ? demoKeyboard_
+                                                          : "none";
+    ImGui::SetItemTooltip("Keyboard: %s\nMIDI ports: what to connect in Bitwig, and whether it "
+                          "works",
+                          keyboard.c_str());
+    if (!ImGui::BeginPopup("midiSetup"))
+        return;
+    ImGui::SeparatorText("Keyboard");
+    drawMidiPicker();
+    ImGui::TextDisabled("MIDI Comp reads the notes you play, so that every loop pass becomes a "
+                        "take.");
+    if (previewPlayer_ != nullptr) {
+        ImGui::SeparatorText("Preview");
+        drawPreviewSetup(checks);
+    }
+    ImGui::EndPopup();
+}
+
+CompView::PreviewChecks CompView::previewChecks(const State* state) const {
+    PreviewChecks c;
+    if (previewPlayer_ == nullptr)
+        return c;
+    c.status = previewPlayer_->status();
+    const PreviewStatus& st = c.status;
+    const std::string track =
+        state != nullptr && state->session ? "\"" + state->session->track + "\"" : "the comp track";
+    const std::string input =
+        st.bitwigPort.empty() ? "the port above" : "\"" + st.bitwigPort + "\"";
+
+    if (!st.portOpen) {
+        c.port = Check::Problem;
+        c.portText = st.error.empty() ? "The port could not be opened." : st.error;
+    } else if (st.bitwigPort.empty()) {
+        c.port = Check::Problem;
+        c.portText = "\"" + st.port +
+                     "\" has no VirMIDI copy. Is the midi-copies service running? "
+                     "(midi-copies list)";
+    } else {
+        c.port = Check::Ok;
+        c.portText = "\"" + st.port + "\" reaches Bitwig as \"" + st.bitwigPort + "\".";
+    }
+
+    c.trackText = "In Bitwig: Settings > Controllers > Add controller > Generic > MIDI Keyboard, "
+                  "input " +
+                  input + ".\nThen choose that controller as the input of track " + track + ".";
+    if (playhead_.noteInput && !*playhead_.noteInput) {
+        c.track = Check::Problem;
+        c.trackText += "\nTrack " + track + " has no note input.";
+    } else if (playhead_.previewHeard && *playhead_.previewHeard > 0) {
+        c.track = Check::Ok;
+        c.trackText += "\nTrack " + track + " plays the preview.";
+    } else if (playhead_.previewHeard && st.noteOns >= 3) {
+        c.track = Check::Problem;
+        c.trackText += "\n" + std::to_string(st.noteOns) + " notes sent, none played on track " +
+                       track + ": check the controller's input and the track's input.";
+    } else {
+        c.trackText += "\nPress Preview and play to check.";
+    }
+
+    const std::string target = st.clockTarget.empty() ? input : "\"" + st.clockTarget + "\"";
+    c.clock = st.clockArriving ? Check::Ok : Check::Unknown;
+    c.clockText =
+        "In Bitwig: Settings > Synchronization, MIDI Sync (OUT) on " + target + ".\n" +
+        (st.clockArriving ? std::string("The clock arrives.")
+                          : std::string("No clock arrives; timing comes from the transport, which "
+                                        "is coarser."));
+    return c;
+}
+
+void CompView::drawPreviewSetup(const PreviewChecks& checks) {
+    const float h = ImGui::GetFrameHeight();
+    const auto row = [&](const Check check, const char* title, const std::string& detail) {
+        const ImU32 color = check == Check::Ok        ? palette_.live
+                            : check == Check::Problem ? palette_.error
+                                                      : palette_.mutedText;
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + h * 0.35f, p.y + h * 0.5f),
+                                                    h * 0.18f, color);
+        ImGui::Dummy(ImVec2(h * 0.7f, h));
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(title);
+        ImGui::Indent(h * 0.7f);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 34.0f);
+        ImGui::TextDisabled("%s", detail.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(h * 0.7f);
+    };
+    row(checks.port, "Port", checks.portText);
+    row(checks.track, "Track input", checks.trackText);
+    row(checks.clock, "MIDI clock (recommended)", checks.clockText);
+
+    if (settings_ != nullptr) {
+        ImGui::Spacing();
+        ImGui::SetNextItemWidth(160.0f * ImGui::GetFontSize() / 13.0f);
+        ImGui::SliderFloat("Preview lead", &settings_->previewLeadMs, 0.0f, 100.0f, "%.0f ms");
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            saveSettings(settingsPath_, *settings_);
+        ImGui::SetItemTooltip("Previews send MIDI this much early, to make up for Bitwig's "
+                              "output latency");
+    }
 }
 
 void CompView::drawStart(ApiClient& client, const State& state) {
@@ -582,10 +700,7 @@ void CompView::drawMidiPicker() {
     const std::string port = midi_->portName();
 
     // Activity light: lit briefly by each note.
-    const double age = static_cast<double>(monotonicMicros() - midi_->lastNoteMicros()) * 1e-6;
-    const bool lit = !port.empty() && midi_->lastNoteMicros() != 0 && age < 0.15;
-    if (lit)
-        redraw_ = true;
+    const bool lit = keyboardLit();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImGui::GetWindowDrawList()->AddCircleFilled(
         ImVec2(p.x + h * 0.35f, p.y + h * 0.5f), h * 0.18f,
@@ -616,7 +731,7 @@ void CompView::drawMidiPicker() {
 void CompView::drawViewMenu() {
     if (ImGui::Button("View"))
         ImGui::OpenPopup("view");
-    ImGui::SetItemTooltip("UI scale");
+    ImGui::SetItemTooltip("UI scale, lane height");
     if (!ImGui::BeginPopup("view"))
         return;
     // The slider keeps its own value while dragged; the scale applies on release, since
@@ -648,15 +763,6 @@ void CompView::drawViewMenu() {
         if (ImGui::IsItemDeactivatedAfterEdit())
             saveSettings(settingsPath_, *settings_);
         ImGui::EndDisabled();
-        if (previewPlayer_ != nullptr) {
-            ImGui::Separator();
-            ImGui::SetNextItemWidth(160.0f * ImGui::GetFontSize() / 13.0f);
-            ImGui::SliderFloat("Preview lead", &settings_->previewLeadMs, 0.0f, 100.0f, "%.0f ms");
-            if (ImGui::IsItemDeactivatedAfterEdit())
-                saveSettings(settingsPath_, *settings_);
-            ImGui::SetItemTooltip("Previews send MIDI this much early, to make up for Bitwig's "
-                                  "output latency");
-        }
     }
     ImGui::EndPopup();
 }
@@ -762,6 +868,8 @@ void CompView::drawSessionStatus(const State& state) {
             "Bitwig only lets extensions edit the selected arranger clip. Any clip on the comp "
             "clip's track counts,\nincluding one Bitwig creates while recording. Launcher clips "
             "do not have this limit.");
+    } else if (s.auditioning) {
+        ImGui::TextColored(color(palette_.live), "Previewing");
     } else if (s.pending && now - pendingSince_ > 0.5) {
         ImGui::TextColored(color(palette_.warning), "Syncing");
     } else {
@@ -955,6 +1063,41 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
     }
     ImGui::EndChild();
     drawHints(state);
+}
+
+void CompView::drawPreviewButton(ApiClient& client, const Session& session) {
+    const bool auditioning = session.auditioning;
+    const bool available = previewPlayer_ == nullptr || previewPlayer_->available();
+    const float width =
+        ImGui::CalcTextSize("End preview").x + 2.0f * ImGui::GetStyle().FramePadding.x;
+    // Accent fill: the way to listen while comping. Live color while it plays.
+    const ImU32 fill = auditioning ? palette_.live : palette_.accent;
+    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(fill));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                          ImGui::ColorConvertU32ToFloat4(darken(fill, 0.1f)));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                          ImGui::ColorConvertU32ToFloat4(darken(fill, 0.2f)));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(palette_.windowBg));
+    ImGui::BeginDisabled(!available || session.recording);
+    if (ImGui::Button(auditioning ? "End preview" : "Preview", ImVec2(width, 0)))
+        client.send("audition", {{"on", auditioning ? "false" : "true"}});
+    ImGui::EndDisabled();
+    ImGui::PopStyleColor(4);
+    std::string status;
+    if (!available)
+        status = "\n\n" + previewPlayer_->error() + "\nUse Play in launcher instead.";
+    else if (auditioning && previewPlayer_ != nullptr) {
+        const std::string timing = previewPlayer_->timingSource();
+        status = "\n\nTiming: " + (timing.empty() ? "waiting for playback" : timing) + ", " +
+                 std::to_string(previewPlayer_->sent()) + " messages sent";
+    }
+    ImGui::SetItemTooltip(
+        "Hear the comp while you edit: the companion plays it, with its controllers, as live "
+        "MIDI\ninto the comp track while Bitwig plays, and the clip stays empty. Ending the "
+        "preview writes\nthe comp back. The companion's port \"MIDI Comp\" must be the "
+        "track's input\n(Linux: its VirMIDI copy; Windows: a loopMIDI port named \"MIDI "
+        "Comp\"); Bitwig's MIDI clock\nsent to that device improves the timing.%s",
+        status.c_str());
 }
 
 void CompView::drawTransportButton(ApiClient& client) {

@@ -168,6 +168,7 @@ The playhead in the session clip, kept out of the state because it changes many 
 {"playing": true, "step": 1834, "stepsPerSecond": 512.0, "canSeek": true,
  "transportPlaying": true, "auditioning": false,
  "originBeat": 248.0, "stepSize": 0.00048828125, "playStart": 1024.0, "loop": [0.0, 30720.0],
+ "noteInput": true, "previewHeard": 12,
  "anchor": {"us": 81234567890, "step": 1835.4}}
 ```
 
@@ -183,7 +184,10 @@ arranger loop region in steps (if on), and
 microseconds on the companion's clock (corrected by the clock offset from `played`), for
 scheduling previews. While Bitwig records into a hidden arranger clip, it is derived from the
 transport position and the loop start in the clip measured at the last recording.
-`stepsPerSecond` lets clients interpolate between polls.
+`stepsPerSecond` lets clients interpolate between polls. `noteInput` says whether the comp
+track has a note input, and `previewHeard`, during a preview, how many times notes started
+playing on the comp track (the clip is empty then, so they come from the track's input): `0`
+while the companion sends notes means the preview does not reach the track.
 
 ### `GET /api/v1/export`
 

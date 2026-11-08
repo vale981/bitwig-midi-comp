@@ -1,6 +1,7 @@
 #include "preview_player.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -22,16 +23,24 @@ constexpr std::size_t kRecentPulses = 48;
 /** Without a pulse for this long, the clock counts as stopped. */
 constexpr std::int64_t kClockTimeoutMicros = 250'000;
 
+/** The VirMIDI copy the preview port is connected to (Linux). */
+struct VirmidiCopy {
+    std::string client;  ///< Sequencer client name, as RtMidi lists it ("Virtual Raw MIDI 16-2").
+    std::string bitwig;  ///< How Bitwig lists it ("Virtual Raw MIDI 3/1").
+};
+
 /**
- * Returns the name of the VirMIDI copy the preview port is connected to (Linux), as RtMidi lists
- * it, so Bitwig's MIDI clock sent to that device can be read back. Parses
- * ``/proc/asound/seq/clients`` line by line.
+ * Returns the VirMIDI copy the preview port is connected to, so Bitwig's MIDI clock sent to
+ * that device can be read back. Parses ``/proc/asound/seq/clients`` line by line. Bitwig numbers
+ * the VirMIDI devices in order of card and device ("Virtual Raw MIDI", "Virtual Raw MIDI 2",
+ * ...), each with subdevices "/1" to "/16".
  */
-std::optional<std::string> clockPortName() {
+[[maybe_unused]] std::optional<VirmidiCopy> previewCopy() {
     std::ifstream in("/proc/asound/seq/clients");
     if (!in)
         return std::nullopt;
     std::map<int, std::string> clientNames;
+    std::vector<std::pair<std::pair<int, int>, std::string>> virmidi;  // (card, device), name
     std::optional<int> target;
     std::string client;
     bool inPreview = false;
@@ -48,6 +57,14 @@ std::optional<std::string> clockPortName() {
             client = line.substr(open + 1, close - open - 1);
             clientNames[std::atoi(line.substr(6, colon - 6).c_str())] = client;
             inPreview = false;
+            constexpr std::string_view kVirmidi = "Virtual Raw MIDI ";
+            if (client.starts_with(kVirmidi)) {
+                const std::string numbers = client.substr(kVirmidi.size());
+                if (const auto dash = numbers.find('-'); dash != std::string::npos)
+                    virmidi.emplace_back(std::pair(std::atoi(numbers.c_str()),
+                                                   std::atoi(numbers.c_str() + dash + 1)),
+                                         client);
+            }
         } else if (line.find("  Port ") == 0) {
             inPreview = client == "MIDI Comp" && line.find("\"Preview\"") != std::string::npos;
         } else if (inPreview && !target) {
@@ -58,7 +75,17 @@ std::optional<std::string> clockPortName() {
     }
     if (!target || !clientNames.contains(*target))
         return std::nullopt;
-    return clientNames[*target];
+    std::ranges::sort(virmidi);
+    const std::string& name = clientNames[*target];
+    const auto it =
+        std::ranges::find(virmidi, name, &std::pair<std::pair<int, int>, std::string>::second);
+    if (it == virmidi.end())
+        return std::nullopt;
+    const auto index = it - virmidi.begin();
+    return VirmidiCopy{.client = name,
+                       .bitwig = "Virtual Raw MIDI" +
+                                 (index > 0 ? " " + std::to_string(index + 1) : std::string()) +
+                                 "/1"};
 }
 
 /** Identifies the controller of a control message, or -1 for other messages. */
@@ -97,6 +124,22 @@ double inLoop(const double step, const Playhead& p) {
     if (p.loop && p.loop->second > p.loop->first && step >= p.loop->second)
         return p.loop->first + std::fmod(step - p.loop->first, p.loop->second - p.loop->first);
     return step;
+}
+
+/** Returns whether a port name names MIDI Comp's loopback port (Windows, loopMIDI). */
+[[maybe_unused]] bool isLoopback(const std::string& name, const bool clock) {
+    std::string l = name;
+    std::ranges::transform(l, l.begin(), [](const unsigned char c) { return std::tolower(c); });
+    return l.find("midi comp") != std::string::npos &&
+           (l.find("clock") != std::string::npos) == clock;
+}
+
+/** Returns the first port for which ``match`` holds. */
+template <typename Match> std::optional<unsigned> findPort(RtMidi& midi, Match&& match) {
+    for (unsigned i = 0; i < midi.getPortCount(); ++i)
+        if (match(midi.getPortName(i)))
+            return i;
+    return std::nullopt;
 }
 
 }  // namespace
@@ -232,7 +275,21 @@ std::vector<PreviewEvent> PreviewEvents::controllersAt(const double step) const 
 PreviewPlayer::PreviewPlayer(std::function<Playhead()> playhead) : playhead_(std::move(playhead)) {
     try {
         out_ = std::make_unique<RtMidiOut>(RtMidi::UNSPECIFIED, "MIDI Comp");
+#ifdef _WIN32
+        // No virtual ports: the player thread looks for a loopback port.
+        error_ = "No MIDI port named \"MIDI Comp\": create one with loopMIDI.";
+#elif defined(__APPLE__)
+        // Apps list virtual ports by their own name: a full one.
+        out_->openVirtualPort("MIDI Comp Preview");
+        outOpen_ = true;
+        portName_ = bitwigPort_ = "MIDI Comp Preview";
+        clockTarget_ = "MIDI Comp Clock";
+#else
+        // Linux: midi-copies and previewCopy() look for this client and port name.
         out_->openVirtualPort("Preview");
+        outOpen_ = true;
+        portName_ = "MIDI Comp / Preview";
+#endif
     } catch (const RtMidiError& e) {
         out_.reset();
         error_ = "No virtual MIDI port on this system: " + e.getMessage();
@@ -264,15 +321,52 @@ void PreviewPlayer::setComp(const State& state) {
     compChanged_ = true;
 }
 
+PreviewStatus PreviewPlayer::status() const {
+    const std::scoped_lock lock(mutex_);
+    return PreviewStatus{.portOpen = outOpen_.load(),
+                         .port = portName_,
+                         .bitwigPort = bitwigPort_,
+                         .clockTarget = clockTarget_,
+                         .clockArriving = lastPulseMicros_ != 0 &&
+                                          monotonicMicros() - lastPulseMicros_ < 1'000'000,
+                         .noteOns = noteOns_.load(),
+                         .timing = timing_,
+                         .error = error_};
+}
+
 std::string PreviewPlayer::timingSource() const {
     const std::scoped_lock lock(mutex_);
     return timing_;
 }
 
+void PreviewPlayer::openLoopback() {
+    // Windows: a loopMIDI port named "MIDI Comp" (not the clock port, if there is one).
+    try {
+        if (const auto port =
+                findPort(*out_, [](const std::string& n) { return isLoopback(n, false); })) {
+            const std::string name = out_->getPortName(*port);
+            out_->openPort(*port, "Preview");
+            outOpen_ = true;
+            const std::scoped_lock lock(mutex_);
+            error_.clear();
+            portName_ = bitwigPort_ = name;
+            if (clockTarget_.empty())
+                clockTarget_ = name;
+        }
+    } catch (const RtMidiError&) {
+    }
+}
+
 void PreviewPlayer::openClockInput() {
-    // Linux: read Bitwig's MIDI clock from the VirMIDI copy the preview port is connected to.
-    const auto name = clockPortName();
-    if (!name)
+#if !defined(_WIN32) && !defined(__APPLE__)
+    // Linux: the copy can change (midi-copies assigns it), so look it up every time.
+    const auto copy = previewCopy();
+    {
+        const std::scoped_lock lock(mutex_);
+        bitwigPort_ = clockTarget_ = copy ? copy->bitwig : std::string();
+    }
+#endif
+    if (clockOpen_)
         return;
     try {
         if (!clockIn_) {
@@ -285,13 +379,32 @@ void PreviewPlayer::openClockInput() {
                 },
                 this);
         }
-        if (clockIn_->isPortOpen())
+#if defined(__APPLE__)
+        // A destination Bitwig can send its clock to.
+        clockIn_->openVirtualPort("MIDI Comp Clock");
+        clockOpen_ = true;
+#elif defined(_WIN32)
+        // A loopMIDI port of its own ("MIDI Comp Clock"), else the preview port.
+        auto port = findPort(*clockIn_, [](const std::string& n) { return isLoopback(n, true); });
+        if (!port)
+            port = findPort(*clockIn_, [](const std::string& n) { return isLoopback(n, false); });
+        if (port) {
+            const std::string name = clockIn_->getPortName(*port);
+            clockIn_->openPort(*port, "Clock");
+            clockOpen_ = true;
+            const std::scoped_lock lock(mutex_);
+            clockTarget_ = name;
+        }
+#else
+        // Linux: the VirMIDI copy the preview port is connected to.
+        if (!copy)
             return;
-        for (unsigned i = 0; i < clockIn_->getPortCount(); ++i)
-            if (clockIn_->getPortName(i).starts_with(*name)) {
-                clockIn_->openPort(i, "Clock");
-                return;
-            }
+        if (const auto port = findPort(
+                *clockIn_, [&copy](const std::string& n) { return n.starts_with(copy->client); })) {
+            clockIn_->openPort(*port, "Clock");
+            clockOpen_ = true;
+        }
+#endif
     } catch (const RtMidiError&) {
         clockIn_.reset();
     }
@@ -305,6 +418,7 @@ void PreviewPlayer::onClock(const double delta, const std::vector<unsigned char>
         return;
     switch (message[0]) {
     case 0xF8:
+        lastPulseMicros_ = time;
         clock_.pulse(time);
         break;
     case 0xFA:
@@ -401,12 +515,16 @@ std::optional<double> PreviewPlayer::clockStep(const std::int64_t timeMicros, co
 }
 
 void PreviewPlayer::send(const PreviewEvent& e) {
+    if (!outOpen_)
+        return;
     try {
         out_->sendMessage(e.bytes.data(), e.size);
     } catch (const RtMidiError&) {
         return;
     }
     ++sent_;
+    if ((e.bytes[0] & 0xF0) == 0x90 && e.bytes[2] > 0)
+        ++noteOns_;
     if (const int key = controllerKey(e); key >= 0)
         controllers_[key] = e;
     const int type = e.bytes[0] & 0xF0;
@@ -418,6 +536,10 @@ void PreviewPlayer::send(const PreviewEvent& e) {
 }
 
 void PreviewPlayer::allNotesOff() {
+    if (!outOpen_) {
+        sounding_.clear();
+        return;
+    }
     for (const auto& [note, count] : sounding_) {
         const std::array<std::uint8_t, 3> off{static_cast<std::uint8_t>(0x80 | note >> 8),
                                               static_cast<std::uint8_t>(note & 0x7F), 0};
@@ -448,6 +570,8 @@ void PreviewPlayer::run() {
         std::this_thread::sleep_for(1ms);
         if (std::chrono::steady_clock::now() - lastClockSearch > 2s) {
             lastClockSearch = std::chrono::steady_clock::now();
+            if (!outOpen_)
+                openLoopback();
             openClockInput();
         }
         if (!enabled_) {

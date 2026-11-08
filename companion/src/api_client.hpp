@@ -41,8 +41,10 @@ struct Playhead {
     bool auditioning = false;       ///< The companion plays the comp (preview).
     /** Arrangement beat of the comp's step 0 (arranger comps whose position is known). */
     std::optional<double> originBeat;
-    double stepSize = 0.0;                          ///< Beats per step, with :member:`originBeat`.
-    std::optional<double> playStart;                ///< Bitwig's play start position in steps.
+    double stepSize = 0.0;            ///< Beats per step, with :member:`originBeat`.
+    std::optional<double> playStart;  ///< Bitwig's play start position in steps.
+    std::optional<bool> noteInput;    ///< Whether the comp track has a note input.
+    std::optional<int> previewHeard;  ///< While previewing: notes the comp track played.
     std::optional<std::pair<double, double>> loop;  ///< Arranger loop region in steps.
     /** Fitted transport while playing: the step at a time (monotonic µs). */
     std::optional<std::pair<std::int64_t, double>> anchor;

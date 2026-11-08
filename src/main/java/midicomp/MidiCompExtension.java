@@ -215,6 +215,8 @@ public class MidiCompExtension extends ControllerExtension
     * empty meanwhile (see :meth:`audition`).
     */
    private boolean auditioning;
+   /** Notes the comp track played during the current preview: the preview reaches it. */
+   private int previewNotesHeard;
    /** Transport position samples ``{nanoTime, beat}`` while playing, for :meth:`transportFit`. */
    private final ArrayDeque<double[]> fitSamples = new ArrayDeque<>();
    private long syncedRevision;
@@ -421,6 +423,12 @@ public class MidiCompExtension extends ControllerExtension
       final Track track = loadBank.getItemAt(0);
       track.position().markInterested();
       track.name().markInterested();
+      track.sourceSelector().hasNoteInputSelected().markInterested();
+      // The clip is empty during a preview, so notes playing on the track come from its input.
+      track.playingNotes().addValueObserver(notes -> {
+         if (auditioning && notes.length > 0 && onCompTrack(track))
+            previewNotesHeard++;
+      });
       for (int i = 0; i < LOAD_SCENES; i++)
       {
          track.clipLauncherSlotBank().getItemAt(i).hasContent().markInterested();
@@ -1489,6 +1497,16 @@ public class MidiCompExtension extends ControllerExtension
                (loopStart - origin) / stepSize,
                (loopStart + transport.arrangerLoopDuration().get() - origin) / stepSize));
          }
+         // For the companion's preview setup check.
+         final Track compTrack = loadBank.getItemAt(0);
+         if (!onCompTrack(compTrack) && live.link() != null
+            && compTrack.position().get() >= 0)
+            loadBank.scrollPosition().set(live.link().trackPosition());
+         else if (onCompTrack(compTrack))
+            extra.append(String.format(",\"noteInput\":%b",
+               compTrack.sourceSelector().hasNoteInputSelected().get()));
+         if (auditioning)
+            extra.append(",\"previewHeard\":").append(previewNotesHeard);
          final long now = System.nanoTime();
          final double fitted = transportFit(now);
          if (playing && !Double.isNaN(fitted))
@@ -1760,6 +1778,7 @@ public class MidiCompExtension extends ControllerExtension
             return Result.fail("Select the comp clip in the arranger first");
          sessionClip().clearAll();
          auditioning = true;
+         previewNotesHeard = 0;
          setMonitoring(track, true);
          log("Preview on: the comp clip is empty, the companion plays the comp to the track");
          return Result.ok("Previewing: the companion plays the comp");
@@ -1770,6 +1789,12 @@ public class MidiCompExtension extends ControllerExtension
       live.link(live.link(), List.of());
       log("Preview off: writing the comp back into the clip");
       return Result.ok("Preview off; the comp is written back");
+   }
+
+   /** Returns whether a track is the comp track of the arranger session. */
+   private boolean onCompTrack(final Track track)
+   {
+      return live.link() != null && track.position().get() == live.link().trackPosition();
    }
 
    /** Switches a track's input monitoring on (or back to automatic). */

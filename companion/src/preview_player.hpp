@@ -111,10 +111,25 @@ class PreviewEvents {
     std::vector<PreviewEvent> events_;
 };
 
+/** What the preview's MIDI setup looks like, for showing what to connect in Bitwig. */
+struct PreviewStatus {
+    bool portOpen = false;
+    std::string port;            ///< The companion's output, as the system lists it.
+    std::string bitwigPort;      ///< What to pick in Bitwig as the controller's input.
+    std::string clockTarget;     ///< What to pick in Bitwig for MIDI Sync (OUT).
+    bool clockArriving = false;  ///< Bitwig's clock pulses arrive (also while stopped).
+    long long noteOns = 0;       ///< Note-ons sent since the preview started.
+    std::string timing;          ///< "MIDI clock", "transport" or "".
+    std::string error;
+};
+
 /**
  * Plays the comp as live MIDI through a virtual port while the transport plays, so it can be
- * heard in Bitwig without writing the clip. Timing comes from Bitwig's MIDI clock when it
- * arrives (Linux: the port's VirMIDI copy), else from the extension's transport fit.
+ * heard in Bitwig without writing the clip. Windows has no virtual ports: there it uses a
+ * loopback port (loopMIDI) whose name contains "MIDI Comp". Timing comes from Bitwig's MIDI
+ * clock when it arrives (Linux: the port's VirMIDI copy; macOS: the virtual input "Clock";
+ * Windows: the loopback port, or one whose name also contains "Clock"), else from the
+ * extension's transport fit.
  */
 class PreviewPlayer {
   public:
@@ -129,14 +144,21 @@ class PreviewPlayer {
     PreviewPlayer(const PreviewPlayer&) = delete;
     PreviewPlayer& operator=(const PreviewPlayer&) = delete;
 
-    /** Returns whether the virtual output port could be created. */
-    [[nodiscard]] bool available() const { return out_ != nullptr; }
+    /** Returns whether the output port is open. */
+    [[nodiscard]] bool available() const { return outOpen_.load(); }
 
     /** Returns an error, for example on platforms without virtual ports. */
     [[nodiscard]] std::string error() const;
 
     /** Turns playing on or off; off sends note-offs for sounding notes. */
-    void setEnabled(bool on) { enabled_ = on; }
+    void setEnabled(bool on) {
+        if (on && !enabled_.exchange(true))
+            noteOns_ = 0;
+        enabled_ = on;
+    }
+
+    /** Returns the state of the MIDI setup. */
+    [[nodiscard]] PreviewStatus status() const;
 
     /** Sends messages this much early, to make up for Bitwig's output latency. */
     void setLeadMillis(double ms) { leadMicros_ = static_cast<std::int64_t>(ms * 1000.0); }
@@ -152,6 +174,7 @@ class PreviewPlayer {
 
   private:
     void run();
+    void openLoopback();
     void openClockInput();
     void onClock(double delta, const std::vector<unsigned char>& message);
     [[nodiscard]] std::optional<double> stepAt(std::int64_t timeMicros, const Playhead& p);
@@ -166,6 +189,13 @@ class PreviewPlayer {
     std::unique_ptr<RtMidiOut> out_;
     std::unique_ptr<RtMidiIn> clockIn_;
     std::string error_;
+    std::atomic<bool> outOpen_{false};
+    bool clockOpen_ = false;            ///< Player thread.
+    std::string portName_;              ///< Guarded by the mutex.
+    std::string bitwigPort_;            ///< Guarded by the mutex.
+    std::string clockTarget_;           ///< Guarded by the mutex.
+    std::int64_t lastPulseMicros_ = 0;  ///< Any clock pulse, running or not (mutex).
+    std::atomic<long long> noteOns_{0};
 
     mutable std::mutex mutex_;  ///< Guards the comp, the clock and the timing source.
     std::shared_ptr<const PreviewEvents> events_ = std::make_shared<PreviewEvents>();

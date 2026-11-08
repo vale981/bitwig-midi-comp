@@ -348,6 +348,8 @@ void testPlayhead() {
                .originBeat = std::nullopt,
                .stepSize = 0.0,
                .playStart = std::nullopt,
+               .noteInput = std::nullopt,
+               .previewHeard = std::nullopt,
                .loop = std::nullopt,
                .anchor = std::nullopt,
                .at = t0};

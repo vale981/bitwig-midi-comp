@@ -1,7 +1,7 @@
 # MIDI Comp
 
 Comping for MIDI clips in Bitwig Studio: record loop passes into a clip, then cut the passes
-together in a companion app while the clip updates live.
+together in a companion app and hear the comp while you edit.
 [Project page](https://bitwig-comp.protagon.space/).
 
 Even though I write code for a living, this is purely vibe-coded so take it for what it is. Without LLMs I'd never have taken on this task and so far the tool seems to be quite useful. Feel free to report bugs :).
@@ -35,7 +35,7 @@ Two parts:
 
    Without overdub, Bitwig keeps only the most recent pass at each loop position, and it hides
    the arranger clip from extensions while it records. The companion therefore reads your
-   keyboard itself (picker in the toolbar; it opens the first keyboard it finds and remembers
+   keyboard itself (picker under *MIDI* in the toolbar; it opens the first keyboard it finds and remembers
    your choice) and sends the notes with their timestamps to the extension, which records the
    transport position against the same clock. When recording stops, the takes are assembled:
 
@@ -57,21 +57,30 @@ Two parts:
 
    ![Passes 4 and 5 being recorded](docs/screenshots/recording.png)
 
-3. **Comp.** Drag across a take lane to use that take for the range (snapped to the *Snap* grid);
-   drag across the comp lane to make a range silent. The clip is rewritten as you edit, and a
-   line shows the playhead. For arranger clips, click the ruler to move it (snapped to the grid,
-   `Shift` for any position); this works once the clip has played, so the companion knows where
-   the clip starts. In a launcher clip from *Play in launcher*, moving the playhead restarts the
-   clip and the arrangement together at that position (Bitwig cannot move a playing launcher
-   clip). Each new pass is added as a lane. While the comp still uses a single take
-   throughout, it switches to the new pass, as with Bitwig's audio takes; once takes are cut
-   together, the comp stays as it is.
+3. **Comp and listen.** Press *Preview* (arranger clips) and play: the companion plays the comp into the track
+   as you edit it, pedals and other controllers included (see [Preview](#preview)). Drag across
+   a take lane to use that take for the range (snapped to the *Snap* grid); drag across the
+   comp lane to make a range silent. A line shows the playhead. For arranger clips, click the
+   ruler to move it (snapped to the grid, `Shift` for any position); this works once the clip
+   has played, so the companion knows where the clip starts. Each new pass is added as a lane.
+   While the comp still uses a single take throughout, it switches to the new pass, as with
+   Bitwig's audio takes; once takes are cut together, the comp stays as it is.
 
-4. **Finish.** *Done* ends the session; the clip keeps the comp. *Revert* restores the clip as it
-   was before the session and ends it. With pedals or other controllers, see
-   [Pedals and controllers](#pedals-and-controllers-cc).
+4. **Finish.** *End preview* writes the comp into the clip. *Done* ends the session; the clip
+   keeps the comp. *Clip > Revert* restores the clip as it was before the session and ends it.
+   With pedals or other controllers, *Clip > Load into Bitwig* brings them into the clip too
+   (see [Pedals and controllers](#pedals-and-controllers-cc)).
 
-Takes recorded elsewhere (another track or launcher slot) can be added with *Add take*, which
+The first toolbar row has the transport, *Record*, *Preview* and the session's state, and on the
+right *MIDI* (keyboard and preview setup), *View*, *Log* and *Done*. The second row has the
+editing controls, saved comps and the *Clip* menu: adding takes, *Load into Bitwig*, *New
+version*, *Play in launcher* and *Revert*.
+
+Without *Preview*, the clip itself is rewritten after every edit, so Bitwig plays the comp
+directly; this is how launcher clips are comped, and how arranger clips are comped where
+*Preview* is not set up ([Without Preview](#without-preview)).
+
+Takes recorded elsewhere (another track or launcher slot) can be added from the *Clip* menu, which
 copies the selected clip's notes. They must start at the same position as the comp clip. A take is
 a copy: recording over or editing the source clip later does not change it, so the same clip can
 be recorded again and added as another take.
@@ -119,18 +128,34 @@ after a change of the timing resolution.
 
 ![Saved comps: recordings and the comps cut from them](docs/screenshots/comps.png)
 
-**Versions.** For launcher clips, *New version* duplicates the clip into another slot and
+**Versions.** For launcher clips, *Clip > New version* duplicates the clip into another slot and
 continues comping the copy with the same takes and cuts; the original keeps its comp. The copy
 gets a version suffix in its title ("Lead" becomes "Lead v2"), so its comps are saved under their
 own name. For arranger clips, duplicate the clip to another track in Bitwig and comp the copy;
 the banner offers to continue with the comp. The API identifies arranger clips only by their
 track, so a copy on the same track would receive every edit as well.
 
+### Preview
+
+*Preview* (arranger comps) plays the comp as live MIDI into the comp track while Bitwig plays.
+The clip stays empty in the meantime, so every edit is heard at once and nothing is written into
+Bitwig until the preview ends, which writes the comp back. It needs a MIDI port from the
+companion into Bitwig, set up once (see [Setting up Preview](#setting-up-preview)).
+
+During a preview the extension turns the track's input monitoring on, and the companion plays
+the comp while Bitwig plays, following loops, seeking and stopping. At every cut and every
+jump, controllers take the value they have at that point of the comp; a controller a take never
+moved is at rest there (0, pitch bend centered). *Preview lead* under *MIDI* sends the MIDI
+earlier, to make up for Bitwig's output latency. The tooltip of *Preview* shows the timing
+source in use: Bitwig's MIDI clock, or without it the extension's view of the transport, which
+is coarser. Live MIDI is not sample-accurate: expect a few milliseconds of variation, more
+without MIDI clock. Notes already sounding where playback starts are not played.
+
 ### Pedals and controllers (CC)
 
 Hi-hat pedals, sustain pedals, mod wheels and pitch bend send control messages rather than
 notes. MIDI Comp records them with the takes and comps them along with the notes. The extension
-API can only write notes into clips, though, so the controllers reach Bitwig through MIDI files,
+API can only write notes into clips, though, so the controllers reach a clip through MIDI files,
 which Bitwig imports as clip automation.
 
 1. **Record** as usual. The companion reads control messages (CC, channel pressure, pitch bend)
@@ -141,20 +166,11 @@ which Bitwig imports as clip automation.
 2. **Comp** as usual. Each cut brings its take's control messages and starts with the take's
    controller values at the cut, so a cut never inherits the previous take's hi-hat opening or
    sustain.
-3. **Listen in the launcher** (arranger comps). *Play in launcher* puts the part of the comp
-   inside the arranger loop region, with its controllers, into a launcher clip that plays in
-   sync with the arrangement, while the other tracks keep playing from the arranger. The clip
-   is exactly one loop long, launched on the coarsest grid that fits the loop, and comes in at
-   the loop start (with the transport stopped, playback starts there). The session continues
-   in that clip, with the same takes and cuts: about a second after each edit, the clip is
-   replaced by the new comp with its controllers. The play button, `Space`, the ruler and the
-   arrow keys start and move playback, clip and arrangement together.
-4. **Back to the arranger.** *Back to arranger* merges the edits into the full comp, returns the
-   track to the arrangement, removes the launcher clips MIDI Comp made and continues the
-   session in the arranger clip (select it first), which gets the comp's notes. It then loads
-   the whole comp with its controllers into a free launcher slot of the track (as *Load into
-   Bitwig* does); copy that clip over the arranger clip in Bitwig (copy and paste, or drag).
-   This copy is manual, because copying and pasting through the API loses the automation.
+3. **Listen** with *Preview*, which plays the controllers along with the notes.
+4. **Finish.** *Clip > Load into Bitwig* writes the comp with its controllers as a MIDI file and loads
+   it into a free launcher slot of the comp track; copy that clip over the arranger clip in
+   Bitwig (copy and paste, or drag). This copy is manual, because copying and pasting through
+   the API loses the automation.
 
 Comps of launcher clips need no extra steps: their clip is replaced with the comp and its
 controllers after each edit. *Load into Bitwig* does the same on demand.
@@ -169,32 +185,25 @@ controllers after each edit. *Load into Bitwig* does the same on demand.
   arranger*, as long as their names are unchanged. The MIDI files are kept in
   `~/.midicomp/midi`. They contain no tempo, so Bitwig does not ask about one.
 
-### Preview (prototype)
+### Without Preview
 
-*Preview* (arranger comps) plays the comp, controllers included, as live MIDI into the comp
-track, while the clip stays empty: edits are heard at once, and nothing is written into the
-clip until the preview ends, which writes the comp back. For controllers in the final clip, use
-*Load into Bitwig* afterwards as usual.
+Where *Preview* is not set up (for example on Windows without loopMIDI), *Clip > Play in
+launcher* lets you hear an arranger comp with its controllers through Bitwig's clip launcher instead.
 
-Setup, once:
-
-1. The companion has a virtual MIDI output, "MIDI Comp" / "Preview". On macOS it appears in
-   Bitwig directly; on Linux the [MIDI copies](#midi-copies-on-linux) service copies it to a
-   VirMIDI port (`midi-copies list` shows which). Windows has no virtual ports.
-2. In Bitwig, add a *Generic > MIDI Keyboard* controller with that port as its input, and set
-   the comp track's input to it.
-3. Optional, for better timing: send Bitwig's MIDI clock to the same device (*Settings >
-   Synchronization*). The companion reads tempo and phase from it; where playback starts comes
-   from the extension, as Bitwig's clock does not send song positions. Without the clock,
-   timing comes from the extension's view of the transport, which is coarser.
-
-During a preview the extension turns the track's input monitoring on, and the companion plays
-the comp while Bitwig plays, following loops, seeking and stopping. At every cut and every
-jump, controllers take the value they have at that point of the comp; a controller a take never
-moved is at rest there (0, pitch bend centered). *Preview lead* in *View*
-sends the MIDI earlier, to make up for Bitwig's output latency. The tooltip of *Preview* shows
-the timing source in use. Live MIDI is not sample-accurate: expect a few milliseconds of
-variation, more without MIDI clock.
+1. **Play in launcher.** The part of the comp inside the arranger loop region, with its
+   controllers, goes into a launcher clip that plays in sync with the arrangement, while the
+   other tracks keep playing from the arranger. The clip is exactly one loop long, launched on
+   the coarsest grid that fits the loop, and comes in at the loop start (with the transport
+   stopped, playback starts there). The session continues in that clip, with the same takes and
+   cuts: about a second after each edit, the clip is replaced by the new comp with its
+   controllers. The play button, `Space`, the ruler and the arrow keys start and move playback,
+   clip and arrangement together (Bitwig cannot move a playing launcher clip, so it restarts
+   at the new position).
+2. **Back to arranger** (a button while playing in the launcher). This merges the edits into the full comp, returns the track to the
+   arrangement, removes the launcher clips MIDI Comp made and continues the session in the
+   arranger clip (select it first), which gets the comp's notes. It then loads the whole comp
+   with its controllers into a free launcher slot of the track (as *Load into Bitwig* does);
+   copy that clip over the arranger clip in Bitwig.
 
 ## Installation
 
@@ -207,8 +216,32 @@ Download the extension and the companion for your platform from the
    has no MIDI ports.
 3. Start `midicomp-companion`. It finds the extension through `~/.midicomp/endpoint.json`, which
    the extension writes on startup, and reconnects when the extension restarts. Pick your
-   keyboard in the toolbar if it is not chosen automatically; the choice is kept in
-   `keyboard.txt` next to the saved comps.
+   keyboard under *MIDI* in the toolbar if it is not chosen automatically; the choice is kept
+   in `keyboard.txt` next to the saved comps.
+4. Set up *Preview* (below).
+
+### Setting up Preview
+
+*MIDI* in the companion's toolbar lists the ports to choose in Bitwig with their names as
+Bitwig shows them, and checks each step: whether the port is open (on Linux: copied to a
+VirMIDI port), whether the comp track has a note input and plays the preview's notes, and
+whether Bitwig's MIDI clock arrives. Its dot turns red while a step fails.
+
+1. **A port into Bitwig.** The companion sends the preview to a MIDI port:
+   - **Linux**: its virtual output "MIDI Comp" / "Preview", which the
+     [MIDI copies](#midi-copies-on-linux) service copies to a VirMIDI port (`midi-copies list`
+     shows which, for example *Virtual Raw MIDI 3/1*).
+   - **macOS**: its virtual output "MIDI Comp Preview", which Bitwig lists directly.
+   - **Windows** has no virtual ports. Install [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)
+     and create a port whose name contains "MIDI Comp"; the companion finds it (also when it
+     is created later).
+2. **The track's input.** In Bitwig, add a *Generic > MIDI Keyboard* controller with that port
+   as its input, and set the comp track's input to it.
+3. **MIDI clock** (recommended, for better timing). Send Bitwig's MIDI clock (*Settings >
+   Synchronization*, *MIDI Sync (OUT)*) to: on Linux the same VirMIDI port; on macOS the
+   companion's virtual input "MIDI Comp Clock"; on Windows the same loopMIDI port, or a
+   second one named "MIDI Comp Clock". The companion reads tempo and phase from it; where
+   playback starts comes from the extension, as Bitwig's clock does not send song positions.
 
 ### Sharing the keyboard
 
@@ -389,6 +422,8 @@ These behaviors come from the API documentation and have not been verified in Bi
 
 - Launcher recordings: the recording state is read from the clip slot and loop passes from the
   clip's playing step. (Arranger recordings, read from the transport, have been tested.)
+- *Preview* on macOS and Windows (loopMIDI), and with MIDI clock there. It has been tested on
+  Linux.
 - When a cursor moves to another clip, the host reports `Empty` for the old notes and `NoteOn`
   for the new ones within the 150 ms settle window.
 - A 16384 x 128 grid does not cost much memory or CPU in the host.

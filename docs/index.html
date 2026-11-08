@@ -163,9 +163,10 @@
       </div>
       <div class="step">
         <div>
-          <h3><span class="number">3</span>Drag across takes</h3>
-          <p>Drag across a take to use that part of it, snapped to the grid. The clip in
-            Bitwig follows every change, so you hear the result right away.</p>
+          <h3><span class="number">3</span>Drag across takes, and listen</h3>
+          <p>Drag across a take to use that part of it, snapped to the grid. Press Preview and
+            MIDI Comp plays the comp into Bitwig in time with the song, so you hear each change
+            right away. When you are done, the comp goes into the clip.</p>
         </div>
         <figure class="shot"><img src="screenshots/session-detail.png" width="1480" height="1000" loading="lazy"
              alt="The comp lane takes its first two bars from pass 1 and the next from pass 4"></figure>
@@ -182,17 +183,17 @@
         <li><strong>Record and comp as usual.</strong> MIDI Comp picks up the pedals and
           controllers along with the notes and shows them as curves under each take. Every cut
           starts with its own take's pedal positions.</li>
-        <li><strong>Listen in the clip launcher.</strong> <em>Play in launcher</em> plays the
-          comped loop from Bitwig's clip launcher, in time with the rest of the arrangement.
-          Each change you make is in the clip a moment later, pedals included. Start and move
-          playback from MIDI Comp.</li>
-        <li><strong>Back to the arrangement.</strong> <em>Back to arranger</em> brings your
-          edits into the arrangement and puts the finished clip, pedals included, in the
-          launcher. Copy it over the arrangement clip in Bitwig.</li>
+        <li><strong>Listen.</strong> Preview plays them along with the notes.</li>
+        <li><strong>Into the clip.</strong> <em>Load into Bitwig</em> puts the finished comp,
+          pedals included, in the clip launcher. Copy it over the arrangement clip in
+          Bitwig.</li>
       </ol>
       <figure class="shot"><img src="screenshots/session-cc.png" width="1500" height="860" loading="lazy"
            alt="Take lanes with sustain pedal and pitch bend curves along the bottom"></figure>
     </div>
+    <p class="note">Without Preview set up, <em>Play in launcher</em> plays the comped loop
+      from Bitwig's clip launcher in time with the arrangement instead, and <em>Back to
+      arranger</em> returns when you are done.</p>
   </section>
 
   <section>
@@ -246,8 +247,16 @@
       <li>Copy the extension into Bitwig's extensions folder
         (<code>~/Bitwig Studio/Extensions/</code>) and add <em>MIDI Comp</em> under
         <em>Settings › Controllers</em> (in the <em>Utility</em> group).</li>
-      <li>Start the companion app. It connects to Bitwig on its own; pick your keyboard in
-        its toolbar.</li>
+      <li>Start the companion app. It connects to Bitwig on its own; pick your keyboard under
+        <em>MIDI</em> in its toolbar.</li>
+      <li>For Preview: add a <em>Generic › MIDI Keyboard</em> controller in Bitwig whose
+        input is the companion's <em>MIDI Comp</em> port, and use it as the comp track's
+        input. Sending Bitwig's MIDI clock to it tightens the timing. <em>MIDI</em> in the
+        companion shows which ports to pick and checks that each one works. On Linux the port
+        reaches Bitwig through a virtual MIDI device, on Windows through a
+        <a href="https://www.tobias-erichsen.de/software/loopmidi.html">loopMIDI</a> port; the
+        <a href="https://github.com/vale981/bitwig-midi-comp#setting-up-preview">README</a>
+        explains the setup.</li>
     </ol>
     <p class="note">This is an alpha, largely written with the help of LLMs. It works for its
       author on Linux with arranger clips; other setups are less tested. Saved comps make it
