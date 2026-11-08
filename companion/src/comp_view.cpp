@@ -336,6 +336,17 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
             "load it into Bitwig:\ninto the comp clip for launcher clips, into a free launcher "
             "slot of the comp track for arranger clips\n(copy it over the arranger clip from "
             "there). The editor writes notes only; this is how CC gets into the clip.");
+        if (state->session->source == "arranger") {
+            ImGui::SameLine();
+            if (ImGui::Button("Play in launcher"))
+                client.send("playInLauncher");
+            ImGui::SetItemTooltip(
+                "Play the comp from the clip launcher while the other tracks play the arrangement:"
+                "\nloads it into a free launcher slot, loops it over the arranger loop region, "
+                "continues\nthe session there and launches it at the next loop start. Edits then "
+                "go to that clip;\ncopy it over the arranger clip when done. Its automation is "
+                "updated with Load into Bitwig.");
+        }
         ImGui::EndDisabled();
     }
 

@@ -140,6 +140,28 @@ public class MidiCompExtension extends ControllerExtension
    /** Bank for finding a free launcher slot on the comp track, see :meth:`loadIntoBitwig`. */
    private TrackBank loadBank;
    private static final int LOAD_SCENES = 64;
+   /** A launcher copy of the comp being set up to play in sync with the arranger loop. */
+   private static final class LauncherPlay
+   {
+      final String comp;
+      final double loopStartInClip;
+      final double loopBeats;
+      ClipLauncherSlot slot;
+      int slotIndex;
+      int step;
+      long at;
+      long since;
+
+      LauncherPlay(final String comp, final double loopStartInClip, final double loopBeats)
+      {
+         this.comp = comp;
+         this.loopStartInClip = loopStartInClip;
+         this.loopBeats = loopBeats;
+      }
+   }
+
+   /** Set up by :meth:`playInLauncher`; the clip is waiting to be loaded while ``slot`` is null. */
+   private LauncherPlay launcherPlay;
    /** A MIDI file waiting for :member:`loadBank` to reach the comp track. */
    private String pendingLoad;
    private long pendingLoadAt;
@@ -423,6 +445,7 @@ public class MidiCompExtension extends ControllerExtension
       updatePreview();
       learnClipStart();
       tickLoad();
+      tickLauncherPlay();
       if (server != null)
          server.publishPlayhead(playheadJson());
 
@@ -489,6 +512,7 @@ public class MidiCompExtension extends ControllerExtension
          case "seek" -> seek(intParam(p, "step"));
          case "transport" -> transportAction(p.getOrDefault("action", ""));
          case "loadIntoBitwig" -> loadIntoBitwig();
+         case "playInLauncher" -> playInLauncher();
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -1356,6 +1380,128 @@ public class MidiCompExtension extends ControllerExtension
       return Result.ok("Loading the comp into a launcher slot of " + live.link().trackName());
    }
 
+   /**
+    * Plays the comp from the clip launcher while the other tracks play the arrangement: loads
+    * it into a free launcher slot of the comp track, loops that clip over the arranger loop
+    * region, moves the session to it (takes and cuts come along) and launches it in the last bar
+    * of the arranger loop, so it comes in at the next loop start and wraps with the arranger.
+    */
+   private Result playInLauncher()
+   {
+      if (live.link() == null || live.link().source() != Take.Source.ARRANGER)
+         return Result.fail("Playing in the launcher starts from an arranger comp");
+      if (!transport.isArrangerLoopEnabled().get())
+         return Result.fail("Turn on the arranger loop over the comp first");
+      final double loopBeats = transport.arrangerLoopDuration().get();
+      final double clipStart = arrangerClipStart();
+      final double loopStartInClip = !Double.isNaN(clipStart)
+         ? transport.arrangerLoopStart().get() - clipStart : Math.round(previewOffsetBeats * 4) / 4.0;
+      final String comp = CompExport.write(model, live.link(), project.get(), stepSize);
+      final Result loading = loadIntoBitwig();
+      if (!loading.ok())
+         return loading;
+      launcherPlay = new LauncherPlay(comp, Math.max(0, loopStartInClip), loopBeats);
+      log(String.format("Playing in the launcher: clip loop from beat %.3f, %.3f beats",
+         launcherPlay.loopStartInClip, loopBeats));
+      return Result.ok("Setting up the comp in the launcher");
+   }
+
+   /** Steps of :meth:`playInLauncher` once the clip is loaded. */
+   private void tickLauncherPlay()
+   {
+      final LauncherPlay play = launcherPlay;
+      final long now = System.nanoTime();
+      if (play == null || play.slot == null || now < play.at)
+         return;
+      switch (play.step)
+      {
+         case 0 ->
+         {
+            play.slot.select();
+            play.step = 1;
+            play.at = now + 400_000_000L;
+         }
+         case 1 ->
+         {
+            final ClipRef selected = launcherRef();
+            final boolean onCopy = selected != null && live.link() != null
+               && selected.trackPosition() == live.link().trackPosition()
+               && selected.sceneIndex() == play.slotIndex;
+            if (!onCopy)
+            {
+               if (now - play.since > 5_000_000_000L)
+               {
+                  log("Playing in the launcher: the loaded clip did not get selected; select it "
+                     + "and launch it yourself");
+                  launcherPlay = null;
+               }
+               else
+                  play.at = now + 200_000_000L;
+               return;
+            }
+            launcherCursor.isLoopEnabled().set(true);
+            launcherCursor.getLoopStart().set(play.loopStartInClip);
+            launcherCursor.getLoopLength().set(play.loopBeats);
+            final String quantization = launchQuantizationId("1");
+            if (quantization != null)
+               launcherCursor.launchQuantization().set(quantization);
+            log("Playing in the launcher: clip loop set, launch quantization "
+               + (quantization == null ? "unchanged (no 1 bar value found)" : quantization));
+            // Comp in the launcher clip from now on, with the same takes and cuts.
+            carryAfterStart = play.comp;
+            final Result started = startSession("launcher");
+            if (!started.ok())
+               carryAfterStart = null;
+            lastMessage = started.message();
+            markDirty();
+            play.step = 2;
+            play.at = now + 200_000_000L;
+         }
+         default ->
+         {
+            // Launch in the last bar of the arranger loop: it starts at the next bar line, which
+            // is the loop start.
+            final double loopEnd =
+               transport.arrangerLoopStart().get() + transport.arrangerLoopDuration().get();
+            final double position = transport.playPosition().get();
+            if (transport.isPlaying().get() && position >= loopEnd - barBeats() && position < loopEnd)
+            {
+               play.slot.launch();
+               log("Playing in the launcher: launched, comes in at the next loop start");
+               lastMessage = "The comp plays from the launcher; the other tracks from the arranger";
+               markDirty();
+               launcherPlay = null;
+               return;
+            }
+            if (now - play.since > 120_000_000_000L)
+            {
+               log("Playing in the launcher: playback did not reach the end of the loop; launch "
+                  + "the clip yourself in the loop's last bar");
+               launcherPlay = null;
+               return;
+            }
+            play.at = now + 20_000_000L;
+         }
+      }
+   }
+
+   /** Returns the id of a launch quantization value, or null; logs the ids once if missing. */
+   private String launchQuantizationId(final String wanted)
+   {
+      final com.bitwig.extension.controller.api.EnumDefinition values =
+         launcherCursor.launchQuantization().enumDefinition();
+      final List<String> ids = new ArrayList<>();
+      for (int i = 0; i < values.getValueCount(); i++)
+      {
+         final String id = values.valueDefinitionAt(i).getId();
+         if (id.equals(wanted))
+            return id;
+         ids.add(id);
+      }
+      log("Launch quantization values: " + String.join(", ", ids));
+      return null;
+   }
+
    /** Writes the comp to ``~/.midicomp/midi/<title>.mid`` and returns the path. */
    private java.nio.file.Path writeMidiFile(final String title) throws java.io.IOException
    {
@@ -1406,6 +1552,13 @@ public class MidiCompExtension extends ControllerExtension
          // do not carry the clip's automation, Bitwig's own copy and paste do.
          lastMessage = String.format("Loaded the comp into launcher slot %d of %s; copy it over "
             + "the arranger clip", i + 1, track.name().get());
+         if (launcherPlay != null && launcherPlay.slot == null)
+         {
+            launcherPlay.slot = slot;
+            launcherPlay.slotIndex = i;
+            launcherPlay.at = System.nanoTime() + 1_000_000_000L;
+            launcherPlay.since = System.nanoTime();
+         }
          markDirty();
          return;
       }
