@@ -70,6 +70,15 @@ class CompView {
     void setDemoKeyboard(std::string name) { demoKeyboard_ = std::move(name); }
 
     /**
+     * Uses a saved comp's session identifier for the current session, so that saved comp shows
+     * as the current one, for screenshots.
+     *
+     * Args:
+     *     id: the session identifier, or empty for a new one per session.
+     */
+    void setDemoSession(std::string id) { demoSession_ = std::move(id); }
+
+    /**
      * Enables previews: the player plays the comp as live MIDI while the extension reports a
      * preview.
      *
@@ -255,6 +264,7 @@ class CompView {
     // Keyboard input.
     MidiInput* midi_ = nullptr;
     std::string demoKeyboard_;
+    std::string demoSession_;
     PreviewPlayer* previewPlayer_ = nullptr;
     long long previewVersion_ = -1;  ///< State version the player's comp comes from.
     Settings* settings_ = nullptr;

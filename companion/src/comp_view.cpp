@@ -826,7 +826,7 @@ void CompView::drawRecordHint(const State& state) {
                             "a take.") +
              4.0f * scale;
         y += centered(y, fontSize, palette_.mutedText,
-                      "Takes recorded elsewhere can be added with \"Add take\".") +
+                      "Takes recorded elsewhere can be added from the Clip menu.") +
              4.0f * scale;
         if (midi_ != nullptr && midi_->portName().empty())
             y += centered(y, fontSize, palette_.warning,
@@ -1583,12 +1583,17 @@ void CompView::updateStore(ApiClient& client, const State* state) {
     const std::string key = state->project + "\n" + state->session->label;
     if (key != sessionKey_) {
         sessionKey_ = key;
-        sessionId_ = sessionStamp();
+        sessionId_ = demoSession_.empty() ? sessionStamp() : demoSession_;
         savedVersion_ = -1;
         lastVersion_ = -1;
         restoreClip_ = state->session->label;
         compName_.clear();
         nameBuffer_.fill('\0');
+        if (const SavedComp* current = currentSave(); current != nullptr) {
+            // Screenshots: continue a saved comp, with its name.
+            compName_ = current->name;
+            compName_.copy(nameBuffer_.data(), nameBuffer_.size() - 1);
+        }
         restoreOffer_ = versionRequested_.exchange(false)
                             ? std::nullopt
                             : store_->offerFor(state->project, state->session->label,

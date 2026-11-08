@@ -331,6 +331,7 @@ python3 tools/midi_copies.py run          # keep it running, e.g. as a systemd u
 - `--demo-keyboard NAME`: show `NAME` in the keyboard picker without opening MIDI (screenshots).
 - `--scale FACTOR`: UI scale on top of the display's scale, for this run (0.5 to 4).
 - `--open-saved-comps`: open the list of saved comps (screenshots).
+- `--demo-session ID`: treat the saved comp of session `ID` as the current one (screenshots).
 - `MIDICOMP_FONT=/path/to/font.ttf`: UI font. Release builds embed Roboto; the Nix build uses Inter.
 
 The UI follows the display's scale (also when the window moves to another display). *View* in
@@ -389,8 +390,12 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 2560x15
 ```
 
 For `comps.png`, write sample saved comps with `python3 tools/mock_store.py DIR`, pass
-`--store-dir DIR --open-saved-comps`, and crop to the popup (1720x760 at 420,385). Screenshots
-ignore the mouse, so no hover effects show.
+`--store-dir DIR --open-saved-comps --demo-session a3` (so "Safe take" is the current comp), and
+crop to the popup (1720x760 at 420,385). The session screenshots (`session-*`, `recording`,
+`select`) use a store with only `DIR/Demo_song__Keys__arranger___a3.json` and
+`DIR/recordings.json`, also with `--demo-session a3`, so the toolbar shows the recording and
+comp names without a restore banner; `start` and `record` use an empty store. Screenshots ignore
+the mouse, so no hover effects show.
 
 GLFW prefers Wayland when `WAYLAND_DISPLAY` is set, so without unsetting it the window opens on
 the desktop instead of Xvfb. Pass `--theme-dir` with an empty directory for stock colors; the

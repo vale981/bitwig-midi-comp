@@ -84,6 +84,7 @@ struct Options {
     std::string demoKeyboard;
     std::optional<float> scale;
     bool openSavedComps = false;
+    std::string demoSession;
 };
 
 void printUsage() {
@@ -98,6 +99,8 @@ void printUsage() {
         "  --demo-keyboard NAME  show NAME as the keyboard without opening MIDI (screenshots)\n"
         "  --scale FACTOR     UI scale on top of the display's, instead of the saved setting\n"
         "  --open-saved-comps open the list of saved comps (screenshots)\n"
+        "  --demo-session ID  treat the saved comp of session ID as the current one "
+        "(screenshots)\n"
         "\n"
         "Environment: MIDICOMP_FONT=path/to/font.ttf overrides the UI font.");
 }
@@ -119,6 +122,8 @@ std::optional<Options> parseArgs(const int argc, char** argv) {
             options.demoKeyboard = argv[++i];
         } else if (arg == "--open-saved-comps") {
             options.openSavedComps = true;
+        } else if (arg == "--demo-session" && hasValue) {
+            options.demoSession = argv[++i];
         } else if (arg == "--scale" && hasValue) {
             const float value = std::strtof(argv[++i], nullptr);
             if (!(value >= 0.5f && value <= 4.0f)) {
@@ -295,6 +300,7 @@ int main(int argc, char** argv) {
     view.setStore(&store);
     // Rendered screenshots should not depend on the connected devices.
     std::unique_ptr<midicomp::MidiInput> midi;
+    view.setDemoSession(options->demoSession);
     if (!options->demoKeyboard.empty()) {
         view.setDemoKeyboard(options->demoKeyboard);
     } else if (!options->screenshot) {
