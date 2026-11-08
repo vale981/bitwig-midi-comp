@@ -69,6 +69,8 @@ std::optional<Playhead> parsePlayhead(const std::string_view json) {
             .originBeat = j.contains("originBeat") ? std::optional(j.at("originBeat").get<double>())
                                                    : std::nullopt,
             .stepSize = j.value("stepSize", 0.0),
+            .playStart = j.contains("playStart") ? std::optional(j.at("playStart").get<double>())
+                                                 : std::nullopt,
             .loop = j.contains("loop") ? std::optional(std::pair(j.at("loop").at(0).get<double>(),
                                                                  j.at("loop").at(1).get<double>()))
                                        : std::nullopt,

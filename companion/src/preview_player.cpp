@@ -61,6 +61,44 @@ std::optional<std::string> clockPortName() {
     return clientNames[*target];
 }
 
+/** Identifies the controller of a control message, or -1 for other messages. */
+int controllerKey(const PreviewEvent& e) {
+    switch (e.bytes[0] & 0xF0) {
+    case 0xB0:
+        return e.bytes[0] << 8 | e.bytes[1];
+    case 0xD0:
+    case 0xE0:
+        return e.bytes[0] << 8 | 0xFF;
+    default:
+        return -1;
+    }
+}
+
+/** Returns a control message's controller at rest: 0, pitch bend centered. */
+PreviewEvent resting(PreviewEvent e, const double step) {
+    e.step = step;
+    switch (e.bytes[0] & 0xF0) {
+    case 0xB0:
+        e.bytes[2] = 0;
+        break;
+    case 0xE0:
+        e.bytes[1] = 0;
+        e.bytes[2] = 64;
+        break;
+    default:
+        e.bytes[1] = 0;
+        break;
+    }
+    return e;
+}
+
+/** Returns ``step`` inside the arranger loop: positions past its end lie at its start again. */
+double inLoop(const double step, const Playhead& p) {
+    if (p.loop && p.loop->second > p.loop->first && step >= p.loop->second)
+        return p.loop->first + std::fmod(step - p.loop->first, p.loop->second - p.loop->first);
+    return step;
+}
+
 }  // namespace
 
 // --- ClockFollower
@@ -70,23 +108,30 @@ void ClockFollower::start(const std::int64_t /*timeMicros*/) {
     pulses_ = 0;
     recent_.clear();
     running_ = true;
+    positioned_ = false;
+    ++epoch_;
 }
 
 void ClockFollower::resume(const std::int64_t /*timeMicros*/) {
     pulses_ = 0;
     recent_.clear();
     running_ = true;
+    ++epoch_;
 }
 
 void ClockFollower::stop() {
     running_ = false;
+    positioned_ = false;
     recent_.clear();
+    ++epoch_;
 }
 
 void ClockFollower::songPosition(const int sixteenths) {
     startBeat_ = sixteenths / 4.0;
     pulses_ = 0;
     recent_.clear();
+    positioned_ = true;
+    ++epoch_;
 }
 
 void ClockFollower::pulse(const std::int64_t timeMicros) {
@@ -168,12 +213,12 @@ std::vector<PreviewEvent> PreviewEvents::between(const double from, const double
 std::vector<PreviewEvent> PreviewEvents::controllersAt(const double step) const {
     std::map<int, PreviewEvent> latest;
     for (const PreviewEvent& e : events_) {
-        if (e.step > step)
-            break;
         if (e.order != 1)
             continue;
-        const int type = e.bytes[0] & 0xF0;
-        latest[type == 0xB0 ? e.bytes[0] << 8 | e.bytes[1] : e.bytes[0] << 8 | 0xFF] = e;
+        if (e.step <= step)
+            latest[controllerKey(e)] = e;
+        else
+            latest.try_emplace(controllerKey(e), resting(e, step));
     }
     std::vector<PreviewEvent> result;
     result.reserve(latest.size());
@@ -283,26 +328,76 @@ void PreviewPlayer::onClock(const double delta, const std::vector<unsigned char>
 std::optional<double> PreviewPlayer::stepAt(const std::int64_t timeMicros, const Playhead& p) {
     if (!p.originBeat || p.stepSize <= 0.0)
         return std::nullopt;
-    std::optional<double> step;
+    std::optional<double> transport;
+    if (p.transportPlaying && p.anchor)
+        transport = p.anchor->second +
+                    static_cast<double>(timeMicros - p.anchor->first) * 1e-6 * p.stepsPerSecond;
+    std::optional<double> beat;
+    int epoch = 0;
+    bool positioned = false;
     {
         const std::scoped_lock lock(mutex_);
         if (clock_.running(timeMicros - leadMicros_.load()))
-            if (const auto beat = clock_.beatAt(timeMicros)) {
-                step = (*beat - *p.originBeat) / p.stepSize;
-                timing_ = "MIDI clock";
-            }
-        if (!step && p.transportPlaying && p.anchor) {
-            step = p.anchor->second +
-                   static_cast<double>(timeMicros - p.anchor->first) * 1e-6 * p.stepsPerSecond;
-            timing_ = "transport";
-        }
-        if (!step)
-            timing_.clear();
+            beat = clock_.beatAt(timeMicros);
+        epoch = clock_.epoch();
+        positioned = clock_.positioned();
     }
-    // The arranger loop: positions past its end lie at its start again.
-    if (step && p.loop && p.loop->second > p.loop->first && *step >= p.loop->second)
-        step = p.loop->first + std::fmod(*step - p.loop->first, p.loop->second - p.loop->first);
+    if (epoch != clockEpoch_) {
+        // A new playback: where the clock's beat 0 lies is not known yet.
+        clockEpoch_ = epoch;
+        clockOffset_.reset();
+        mismatchSince_.reset();
+    }
+    if (beat && !clockOffset_) {
+        if (positioned)
+            clockOffset_ = -*p.originBeat / p.stepSize;  // the beat is the song position
+        else if (p.playStart)
+            clockOffset_ = *p.playStart;  // counted from the play start
+        else if (transport)
+            clockOffset_ = *transport - *beat / p.stepSize;
+    }
+    std::optional<double> step;
+    if (beat && clockOffset_)
+        step = clockStep(timeMicros, *beat, transport, p);
+    const char* source = step ? "MIDI clock" : transport ? "transport" : "";
+    if (!step)
+        step = transport;
+    {
+        const std::scoped_lock lock(mutex_);
+        timing_ = source;
+    }
+    if (step)
+        step = inLoop(*step, p);
     return step;
+}
+
+std::optional<double> PreviewPlayer::clockStep(const std::int64_t timeMicros, const double beat,
+                                               const std::optional<double> transport,
+                                               const Playhead& p) {
+    const double step = beat / p.stepSize + *clockOffset_;
+    if (!transport) {
+        mismatchSince_.reset();
+        return step;
+    }
+    // Check against the transport, for jumps the clock does not report: compare inside the loop,
+    // as the clock counts on across loop wraps.
+    double diff = inLoop(*transport, p) - inLoop(step, p);
+    if (p.loop && p.loop->second > p.loop->first) {
+        const double length = p.loop->second - p.loop->first;
+        diff = std::remainder(diff, length);
+    }
+    if (std::abs(diff) * p.stepSize < 0.25) {
+        mismatchSince_.reset();
+        return step;
+    }
+    if (!mismatchSince_)
+        mismatchSince_ = timeMicros;
+    if (timeMicros - *mismatchSince_ < 150'000)
+        return step;
+    // Disagreed for a while: the transport is right.
+    *clockOffset_ += diff;
+    mismatchSince_.reset();
+    return step + diff;
 }
 
 void PreviewPlayer::send(const PreviewEvent& e) {
@@ -312,6 +407,8 @@ void PreviewPlayer::send(const PreviewEvent& e) {
         return;
     }
     ++sent_;
+    if (const int key = controllerKey(e); key >= 0)
+        controllers_[key] = e;
     const int type = e.bytes[0] & 0xF0;
     const int note = (e.bytes[0] & 0x0F) << 8 | e.bytes[1];
     if (type == 0x90)
@@ -331,6 +428,17 @@ void PreviewPlayer::allNotesOff() {
         }
     }
     sounding_.clear();
+}
+
+void PreviewPlayer::sendControllers(const PreviewEvents& events, const double step) {
+    std::map<int, PreviewEvent> previous = controllers_;
+    for (const PreviewEvent& e : events.controllersAt(step)) {
+        previous.erase(controllerKey(e));
+        send(e);
+    }
+    // Controllers only an earlier comp used go back to rest.
+    for (const auto& [key, e] : previous)
+        send(resting(e, step));
 }
 
 void PreviewPlayer::run() {
@@ -365,8 +473,7 @@ void PreviewPlayer::run() {
         if (changed) {
             // The comp changed: end what sounds, the new comp takes over from here.
             allNotesOff();
-            for (const PreviewEvent& e : events.controllersAt(*step))
-                send(e);
+            sendControllers(events, *step);
             lastStep_ = *step;
             continue;
         }
@@ -380,15 +487,13 @@ void PreviewPlayer::run() {
                 for (const PreviewEvent& e : events.between(lastStep_, p.loop->second))
                     send(e);
                 allNotesOff();
-                for (const PreviewEvent& e : events.controllersAt(p.loop->first))
-                    send(e);
+                sendControllers(events, p.loop->first);
                 for (const PreviewEvent& e : events.between(p.loop->first, *step))
                     send(e);
             } else {
                 // Started, sought or jumped: silence, then the controllers' state here.
                 allNotesOff();
-                for (const PreviewEvent& e : events.controllersAt(*step))
-                    send(e);
+                sendControllers(events, *step);
             }
             lastStep_ = *step;
             continue;

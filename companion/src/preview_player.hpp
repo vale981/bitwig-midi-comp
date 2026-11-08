@@ -23,7 +23,11 @@ namespace midicomp {
 
 /**
  * Follows Bitwig's MIDI clock: 24 pulses per quarter note, start, continue, stop and song
- * position pointers. Gives the transport beat at any time from the timestamps of recent pulses.
+ * position pointers. Gives the beat at any time from the timestamps of recent pulses.
+ *
+ * Bitwig sends a bare start also when playback starts in the middle of the song, so the beat
+ * counts from the start message unless a song position pointer said where the song is
+ * (:meth:`positioned`).
  */
 class ClockFollower {
   public:
@@ -43,6 +47,12 @@ class ClockFollower {
     /** Timing clock (``0xF8``). */
     void pulse(std::int64_t timeMicros);
 
+    /** Returns whether a song position pointer gave the beat since the last start or stop. */
+    [[nodiscard]] bool positioned() const { return positioned_; }
+
+    /** Counts start, continue, stop and song position messages, to notice a new playback. */
+    [[nodiscard]] int epoch() const { return epoch_; }
+
     /** Returns whether the clock runs and has sent a pulse recently. */
     [[nodiscard]] bool running(std::int64_t nowMicros) const;
 
@@ -59,6 +69,8 @@ class ClockFollower {
 
   private:
     bool running_ = false;
+    bool positioned_ = false;
+    int epoch_ = 0;
     double startBeat_ = 0.0;  ///< Beat of the first pulse after start or continue.
     long long pulses_ = 0;    ///< Pulses since then.
     std::int64_t lastPulse_ = 0;
@@ -87,7 +99,10 @@ class PreviewEvents {
     /** Returns the messages with ``from < step <= to``, in order. */
     [[nodiscard]] std::vector<PreviewEvent> between(double from, double to) const;
 
-    /** Returns the latest message of each controller at or before ``step``. */
+    /**
+     * Returns the latest message of each controller of the comp at or before ``step``, or its
+     * resting value (0, pitch bend centered) where it has none yet.
+     */
     [[nodiscard]] std::vector<PreviewEvent> controllersAt(double step) const;
 
     [[nodiscard]] std::size_t size() const { return events_.size(); }
@@ -140,8 +155,12 @@ class PreviewPlayer {
     void openClockInput();
     void onClock(double delta, const std::vector<unsigned char>& message);
     [[nodiscard]] std::optional<double> stepAt(std::int64_t timeMicros, const Playhead& p);
+    [[nodiscard]] std::optional<double> clockStep(std::int64_t timeMicros, double beat,
+                                                  std::optional<double> transport,
+                                                  const Playhead& p);
     void send(const PreviewEvent& e);
     void allNotesOff();
+    void sendControllers(const PreviewEvents& events, double step);
 
     std::function<Playhead()> playhead_;
     std::unique_ptr<RtMidiOut> out_;
@@ -155,9 +174,13 @@ class PreviewPlayer {
     TimestampAnchor clockAnchor_;
     std::string timing_;
 
-    std::map<int, int>
-        sounding_;  ///< ``channel << 8 | key`` to number of note-ons (player thread).
+    // Player thread:
+    std::map<int, int> sounding_;              ///< ``channel << 8 | key`` to number of note-ons.
+    std::map<int, PreviewEvent> controllers_;  ///< Last message sent per controller.
     double lastStep_ = -1.0;
+    int clockEpoch_ = -1;
+    std::optional<double> clockOffset_;          ///< Comp step at clock beat 0.
+    std::optional<std::int64_t> mismatchSince_;  ///< Since when clock and transport disagree.
     std::atomic<bool> enabled_{false};
     std::atomic<std::int64_t> leadMicros_{10'000};
     std::atomic<bool> stopping_{false};

@@ -42,6 +42,7 @@ struct Playhead {
     /** Arrangement beat of the comp's step 0 (arranger comps whose position is known). */
     std::optional<double> originBeat;
     double stepSize = 0.0;                          ///< Beats per step, with :member:`originBeat`.
+    std::optional<double> playStart;                ///< Bitwig's play start position in steps.
     std::optional<std::pair<double, double>> loop;  ///< Arranger loop region in steps.
     /** Fitted transport while playing: the step at a time (monotonic µs). */
     std::optional<std::pair<std::int64_t, double>> anchor;

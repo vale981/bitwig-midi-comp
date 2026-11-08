@@ -37,6 +37,23 @@ class ControlsTest
    }
 
    @Test
+   void controllersATakeNeverSetReturnToRest()
+   {
+      final CompModel model = new CompModel();
+      final Take pedalled = model.addTake("Pedal", Take.Source.ARRANGER, 400, List.of(),
+         List.of(pedal(0, 127), new ControlEvent(10, 0xE0, 0, 100)));
+      final Take plain = model.addTake("Plain", Take.Source.ARRANGER, 400, List.of(), List.of());
+      model.assign(0, 400, plain.id());
+      model.assign(100, 200, pedalled.id());
+
+      // 0-100 plain: the pedal at 0 and pitch bend centered. 100-200: the pedalled take's
+      // state. 200-400 plain again: back to rest.
+      final ControlEvent center = new ControlEvent(0, 0xE0, 0, 64);
+      assertEquals(List.of(pedal(0, 0), center, pedal(100, 127), new ControlEvent(100, 0xE0, 0, 100),
+         pedal(200, 0), center.at(200)), model.renderControls());
+   }
+
+   @Test
    void midiFilePutsControlsBeforeNotesAtTheSamePosition()
    {
       final NoteData hat = new NoteData(9, 128, 42, 100 / 127.0, 0, 0, 0.125, 0, 0, 0, 0.5, 0,

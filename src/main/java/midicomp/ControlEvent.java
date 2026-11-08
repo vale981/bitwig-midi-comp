@@ -32,4 +32,20 @@ record ControlEvent(int x, int status, int data1, int data2)
    {
       return new ControlEvent(newX, status, data1, data2);
    }
+
+   /**
+    * Returns this controller at rest, at the same position: control changes and channel pressure
+    * at 0, pitch bend at the center.
+    */
+   ControlEvent resting()
+   {
+      return (status & 0xF0) == 0xE0 ? new ControlEvent(x, status, 0, 64)
+         : new ControlEvent(x, status, (status & 0xF0) == 0xB0 ? data1 : 0, 0);
+   }
+
+   /** Returns whether this and another message set the same controller to the same value. */
+   boolean sameValue(final ControlEvent other)
+   {
+      return status == other.status && data1 == other.data1 && data2 == other.data2;
+   }
 }

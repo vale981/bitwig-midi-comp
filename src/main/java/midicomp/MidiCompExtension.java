@@ -1471,14 +1471,17 @@ public class MidiCompExtension extends ControllerExtension
          }
       }
       final double stepsPerSecond = transport.tempo().value().getRaw() / 60.0 / stepSize;
-      // For previews: where step 0 of the comp lies in the arrangement, the loop region in
-      // steps, and a fitted anchor (companion clock) of the transport while playing.
+      // For previews: where step 0 of the comp lies in the arrangement, the play start and the
+      // loop region in steps, and a fitted anchor (companion clock) of the transport while playing.
       final StringBuilder extra = new StringBuilder();
       final double origin = arrangerClipStart();
       if (!Double.isNaN(origin))
       {
          extra.append(String.format(java.util.Locale.ROOT, ",\"originBeat\":%.6f,\"stepSize\":%s",
             origin, Json.number(stepSize)));
+         // Where playback starts: Bitwig's MIDI clock sends a bare start without a song position.
+         extra.append(String.format(java.util.Locale.ROOT, ",\"playStart\":%.3f",
+            (transport.playStartPosition().get() - origin) / stepSize));
          if (transport.isArrangerLoopEnabled().get())
          {
             final double loopStart = transport.arrangerLoopStart().get();

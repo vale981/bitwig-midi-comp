@@ -244,32 +244,54 @@ final class CompModel
 
    /**
     * Builds the comp's control messages: each segment contributes its take's messages inside it,
-    * and at its start the take's last value of every controller before it, so that a cut does
-    * not keep the previous take's state (for example the hi-hat opening).
+    * and at its start the take's value of every controller used in the comp, so that a cut does
+    * not keep the previous take's state (for example the hi-hat opening). A take without a value
+    * for a controller there gets the resting value (see :meth:`ControlEvent#resting`), so a
+    * controller another take moved returns to 0.
     *
     * Returns:
     *    The messages, by position.
     */
    List<ControlEvent> renderControls()
    {
-      final List<ControlEvent> result = new ArrayList<>();
+      // Every controller any take of the comp uses.
+      final java.util.Map<Integer, ControlEvent> used = new java.util.LinkedHashMap<>();
       for (final Segment s : segments)
       {
          final Take take = take(s.takeId());
-         if (take == null)
-            continue;
-         final java.util.Map<Integer, ControlEvent> before = new java.util.LinkedHashMap<>();
+         if (take != null)
+            for (final ControlEvent c : take.controls())
+               used.putIfAbsent(c.controller(), c);
+      }
+      final List<ControlEvent> result = new ArrayList<>();
+      final java.util.Map<Integer, ControlEvent> current = new java.util.HashMap<>();
+      for (final Segment s : segments)
+      {
+         final Take take = take(s.takeId());
+         final List<ControlEvent> controls = take == null ? List.of() : take.controls();
+         final java.util.Map<Integer, ControlEvent> atStart = new java.util.LinkedHashMap<>();
+         for (final ControlEvent c : used.values())
+            atStart.put(c.controller(), c.resting());
          final List<ControlEvent> inside = new ArrayList<>();
-         for (final ControlEvent c : take.controls())
+         for (final ControlEvent c : controls)
          {
-            if (c.x() < s.from())
-               before.put(c.controller(), c);
+            if (c.x() <= s.from())
+               atStart.put(c.controller(), c);
             else if (c.x() < s.to())
                inside.add(c);
          }
-         for (final ControlEvent c : before.values())
-            result.add(c.at(s.from()));
-         result.addAll(inside);
+         for (final ControlEvent c : atStart.values())
+         {
+            // Skip values that hold already.
+            final ControlEvent previous = current.put(c.controller(), c);
+            if (previous == null || !previous.sameValue(c))
+               result.add(c.at(s.from()));
+         }
+         for (final ControlEvent c : inside)
+         {
+            result.add(c);
+            current.put(c.controller(), c);
+         }
       }
       return result;
    }

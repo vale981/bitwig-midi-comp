@@ -102,6 +102,10 @@ State document:
 Note arrays: `x` start step, `key` MIDI key (0-127), `durationSteps` (may be fractional),
 `velocity` 0-1, `muted` 0/1, `takeId` (only in `comp`; `-1` in takes).
 
+`compControls` starts each segment with the value every controller of the comp has there in
+the segment's take, or its resting value (0, pitch bend centered) if the take has none, so a
+controller does not keep another take's value across a cut. Unchanged values are left out.
+
 ### `POST /api/v1/<command>?<parameters>`
 
 Parameters go in the query string; only `import` and `played` read the body. Every command returns
@@ -163,7 +167,7 @@ The playhead in the session clip, kept out of the state because it changes many 
 ```json
 {"playing": true, "step": 1834, "stepsPerSecond": 512.0, "canSeek": true,
  "transportPlaying": true, "auditioning": false,
- "originBeat": 248.0, "stepSize": 0.00048828125, "loop": [0.0, 30720.0],
+ "originBeat": 248.0, "stepSize": 0.00048828125, "playStart": 1024.0, "loop": [0.0, 30720.0],
  "anchor": {"us": 81234567890, "step": 1835.4}}
 ```
 
@@ -172,7 +176,9 @@ whose position is known (learned while the clip plays: transport position minus 
 it also follows the transport while the clip is not selected, and shows the play start position
 while stopped. `canSeek` says whether `seek` works; `transportPlaying` whether Bitwig plays at
 all. For arranger comps whose position is known, `originBeat` is the arrangement beat of step 0
-and `stepSize` the beats per step, `loop` the arranger loop region in steps (if on), and
+and `stepSize` the beats per step, `playStart` Bitwig's play start position in steps (where
+playback starts; Bitwig's MIDI clock sends a bare start without a song position), `loop` the
+arranger loop region in steps (if on), and
 `anchor` while playing a fitted transport position: the step at a monotonic time in
 microseconds on the companion's clock (corrected by the clock offset from `played`), for
 scheduling previews. While Bitwig records into a hidden arranger clip, it is derived from the

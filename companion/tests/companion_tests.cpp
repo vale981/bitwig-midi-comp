@@ -347,6 +347,7 @@ void testPlayhead() {
                .auditioning = false,
                .originBeat = std::nullopt,
                .stepSize = 0.0,
+               .playStart = std::nullopt,
                .loop = std::nullopt,
                .anchor = std::nullopt,
                .at = t0};
@@ -380,6 +381,16 @@ void testAudition() {
     CHECK(!clock.running(5'000'000));  // no pulses for a while
     clock.stop();
     CHECK(!clock.running(1'000'000 + 47 * 20'833));
+    CHECK(!clock.positioned());
+
+    // Bitwig sends a bare start also mid-song: the beat counts from it, unpositioned.
+    const int epoch = clock.epoch();
+    clock.start(0);
+    CHECK(!clock.positioned() && clock.epoch() != epoch);
+    for (int i = 0; i < 24; ++i)
+        clock.pulse(2'000'000 + i * 20'833);
+    const auto fromStart = clock.beatAt(2'000'000 + 24 * 20'833);
+    CHECK(fromStart && std::abs(*fromStart - 1.0) < 0.002);
 
     // A comp with a note (on, off) and a pedal: order and controller state.
     State state;
@@ -402,6 +413,15 @@ void testAudition() {
     const auto state200 = events.controllersAt(200.0);
     CHECK(state200.size() == 1 && state200[0].bytes[2] == 127);
     CHECK(events.controllersAt(300.0)[0].bytes[2] == 0);
+    // Before the pedal's first message: at rest.
+    const auto state50 = events.controllersAt(50.0);
+    CHECK(state50.size() == 1 && state50[0].bytes[0] == 0xB9 && state50[0].bytes[1] == 4 &&
+          state50[0].bytes[2] == 0);
+    // Pitch bend rests at the center.
+    state.compControls = {ControlPoint{.x = 100, .status = 0xE0, .data1 = 0, .data2 = 100}};
+    events.build(state);
+    const auto bend = events.controllersAt(0.0);
+    CHECK(bend.size() == 1 && bend[0].bytes[1] == 0 && bend[0].bytes[2] == 64);
 }
 
 void testSettings() {

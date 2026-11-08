@@ -184,11 +184,14 @@ Setup, once:
 2. In Bitwig, add a *Generic > MIDI Keyboard* controller with that port as its input, and set
    the comp track's input to it.
 3. Optional, for better timing: send Bitwig's MIDI clock to the same device (*Settings >
-   Synchronization*). The companion reads it back; without it, timing comes from the
-   extension's view of the transport, which is coarser.
+   Synchronization*). The companion reads tempo and phase from it; where playback starts comes
+   from the extension, as Bitwig's clock does not send song positions. Without the clock,
+   timing comes from the extension's view of the transport, which is coarser.
 
 During a preview the extension turns the track's input monitoring on, and the companion plays
-the comp while Bitwig plays, following loops, seeking and stopping. *Preview lead* in *View*
+the comp while Bitwig plays, following loops, seeking and stopping. At every cut and every
+jump, controllers take the value they have at that point of the comp; a controller a take never
+moved is at rest there (0, pitch bend centered). *Preview lead* in *View*
 sends the MIDI earlier, to make up for Bitwig's output latency. The tooltip of *Preview* shows
 the timing source in use. Live MIDI is not sample-accurate: expect a few milliseconds of
 variation, more without MIDI clock.
