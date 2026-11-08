@@ -433,8 +433,13 @@ void testSettings() {
     CHECK(saveSettings(file, Settings{.uiScale = 1.5f, .laneHeight = 90.0f}));
     const Settings read = loadSettings(file);
     CHECK(read.uiScale == 1.5f && read.laneHeight == 90.0f);
-    write(file, R"({"uiScale": 99, "laneHeight": -3})");
-    CHECK(loadSettings(file) == Settings{});  // out of range: defaults
+    CHECK(read.automationReminder);  // on by default
+    Settings off;
+    off.automationReminder = false;
+    CHECK(saveSettings(file, off));
+    CHECK(!loadSettings(file).automationReminder);
+    write(file, R"({"uiScale": 99, "laneHeight": -3, "automationReminder": "no"})");
+    CHECK(loadSettings(file) == Settings{});  // out of range or wrong type: defaults
 }
 
 void testMidi() {

@@ -231,7 +231,7 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         }
         if (session.source == "arranger") {
             ImGui::SameLine();
-            drawPreviewButton(client, session);
+            drawPreviewButton(client, *state);
         }
         ImGui::SameLine();
         ImGui::TextDisabled("|");
@@ -1059,7 +1059,8 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
     drawHints(state);
 }
 
-void CompView::drawPreviewButton(ApiClient& client, const Session& session) {
+void CompView::drawPreviewButton(ApiClient& client, const State& state) {
+    const Session& session = *state.session;
     const bool auditioning = session.auditioning;
     const bool available = previewPlayer_ == nullptr || previewPlayer_->available();
     const float width =
@@ -1073,10 +1074,19 @@ void CompView::drawPreviewButton(ApiClient& client, const Session& session) {
                           ImGui::ColorConvertU32ToFloat4(darken(fill, 0.2f)));
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(palette_.windowBg));
     ImGui::BeginDisabled(!available || session.recording);
-    if (ImGui::Button(auditioning ? "End preview" : "Preview", ImVec2(width, 0)))
-        client.send("audition", {{"on", auditioning ? "false" : "true"}});
+    if (ImGui::Button(auditioning ? "End preview" : "Preview", ImVec2(width, 0))) {
+        // With controllers in the takes, the clip may hold automation the preview cannot clear.
+        const bool controls =
+            !state.compControls.empty() ||
+            std::ranges::any_of(state.takes, [](const Take& t) { return t.controls > 0; });
+        if (!auditioning && controls && settings_ != nullptr && settings_->automationReminder)
+            ImGui::OpenPopup("Before the preview");
+        else
+            client.send("audition", {{"on", auditioning ? "false" : "true"}});
+    }
     ImGui::EndDisabled();
     ImGui::PopStyleColor(4);
+    drawAutomationReminder(client);
     std::string status;
     if (!available)
         status = "\n\n" + previewPlayer_->error() + "\nUse Play in launcher instead.";
@@ -1095,6 +1105,36 @@ void CompView::drawPreviewButton(ApiClient& client, const Session& session) {
         "the API\ncannot reach automation, which would keep playing alongside the preview's "
         "controllers.%s",
         status.c_str());
+}
+
+void CompView::drawAutomationReminder(ApiClient& client) {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("Before the preview", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
+    ImGui::TextUnformatted("Delete the clip's automation lanes in Bitwig first.");
+    ImGui::Spacing();
+    ImGui::TextDisabled("The preview empties the clip's notes and plays the comp's controllers "
+                        "live, but extensions cannot reach clip automation. Automation recorded "
+                        "with the passes, or loaded with Load into Bitwig, would keep playing "
+                        "alongside the preview's pedals and controllers.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    bool dontShow = !settings_->automationReminder;
+    if (ImGui::Checkbox("Don't show this again", &dontShow)) {
+        settings_->automationReminder = !dontShow;
+        saveSettings(settingsPath_, *settings_);
+    }
+    ImGui::Spacing();
+    if (ImGui::Button("Start preview")) {
+        client.send("audition", {{"on", "true"}});
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
 }
 
 void CompView::drawTransportButton(ApiClient& client) {

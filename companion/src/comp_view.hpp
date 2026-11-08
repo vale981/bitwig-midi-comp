@@ -180,7 +180,12 @@ class CompView {
     /** Returns whether a keyboard note arrived just now (and keeps redrawing while so). */
     bool keyboardLit();
     /** Draws the preview toggle (arranger sessions), with the timing in its tooltip. */
-    void drawPreviewButton(ApiClient& client, const Session& session);
+    void drawPreviewButton(ApiClient& client, const State& state);
+    /**
+     * Draws the reminder before a preview of a comp with controllers: the clip's automation
+     * lanes must be deleted in Bitwig. Can be turned off.
+     */
+    void drawAutomationReminder(ApiClient& client);
     /** Draws the play/stop button. */
     void drawTransportButton(ApiClient& client);
     /** Space: play or stop; Left, Right, Home: move the playhead. */

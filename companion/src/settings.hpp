@@ -9,6 +9,8 @@ struct Settings {
     float uiScale = 1.0f;         ///< Factor on top of the display's scale.
     float laneHeight = 0.0f;      ///< Take lane height in unscaled pixels; 0 fits the window.
     float previewLeadMs = 10.0f;  ///< Preview messages are sent this much early.
+    /** Before a preview, remind that the clip's automation lanes must be deleted. */
+    bool automationReminder = true;
 
     bool operator==(const Settings&) const = default;
 };

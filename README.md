@@ -156,7 +156,9 @@ without MIDI clock. Notes already sounding where playback starts are not played.
 **Clear the clip's automation first.** The preview empties the clip's notes, but the API cannot
 reach its automation: CC automation in the clip (recorded with the passes, or loaded with *Load
 into Bitwig*) keeps playing and fights the preview's controllers. Before previewing a comp with
-pedals or other controllers, delete the clip's automation lanes in Bitwig.
+pedals or other controllers, delete the clip's automation lanes in Bitwig. The companion reminds
+you when you press *Preview* while the takes contain controllers ("Don't show this again"
+turns the reminder off; `automationReminder` in `settings.json` turns it back on).
 
 ### Pedals and controllers (CC)
 
