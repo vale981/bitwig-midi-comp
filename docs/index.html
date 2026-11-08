@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDI Comp – comping for MIDI clips in Bitwig Studio</title>
+<meta name="description" content="Record loop passes into a MIDI clip in Bitwig Studio and cut the best parts together in a companion app, while the clip updates live.">
+<style>
+  :root {
+    --bg: #faf4ed;
+    --surface: #fffaf3;
+    --overlay: #f2e9e1;
+    --text: #575279;
+    --subtle: #797593;
+    --muted: #9893a5;
+    --accent: #907aa9;
+    --accent-strong: #7c6797;
+    --rose: #b4637a;
+    --line: #dfdad9;
+    /* Rose Pine Dawn, like the screenshots. */
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 0 20px 64px; }
+  a { color: var(--accent-strong); }
+  img { max-width: 100%; height: auto; display: block; }
+  code {
+    font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--overlay);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+
+  header { padding: 72px 0 36px; }
+  h1 { font-size: 2.6rem; line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .lead { font-size: 1.25rem; color: var(--subtle); margin: 0 0 28px; max-width: 40em; }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .button {
+    display: inline-block;
+    padding: 10px 18px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    border: 1px solid var(--accent);
+  }
+  .button.primary { background: var(--accent); color: var(--bg); }
+  .button.secondary { color: var(--accent-strong); }
+  .badge {
+    font-size: 0.85rem;
+    color: var(--rose);
+    border: 1px solid var(--rose);
+    border-radius: 999px;
+    padding: 2px 10px;
+  }
+
+  figure { margin: 0; }
+  .shot {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface);
+    box-shadow: 0 10px 30px rgba(87, 82, 121, 0.12);
+  }
+  figcaption { color: var(--muted); font-size: 0.9rem; margin-top: 8px; }
+
+  section { padding-top: 64px; }
+  h2 { font-size: 1.6rem; margin: 0 0 20px; }
+  h3 { font-size: 1.1rem; margin: 0 0 6px; }
+
+  .steps { display: grid; gap: 40px; }
+  .step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 28px; align-items: center; }
+  .step p { margin: 0; color: var(--subtle); }
+  .number {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: var(--bg);
+    font-weight: 700; font-size: 0.95rem; margin-right: 8px;
+  }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .feature {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 20px;
+  }
+  .feature p { margin: 0; color: var(--subtle); font-size: 0.97rem; }
+
+  ol.install { padding-left: 1.3em; margin: 0; }
+  ol.install li { margin-bottom: 10px; }
+  .note {
+    margin-top: 24px;
+    padding: 14px 18px;
+    border-left: 3px solid var(--rose);
+    background: var(--surface);
+    color: var(--subtle);
+    border-radius: 0 6px 6px 0;
+  }
+
+  footer {
+    max-width: 1040px; margin: 0 auto; padding: 24px 20px 48px;
+    border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 0.9rem;
+  }
+
+  @media (max-width: 760px) {
+    header { padding-top: 48px; }
+    h1 { font-size: 2rem; }
+    .step { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>MIDI Comp</h1>
+    <p class="lead">Comping for MIDI clips in Bitwig Studio. Record a loop as many times as you
+      like, then cut the best parts of each pass together while the clip updates live.</p>
+    <div class="actions">
+      <a class="button primary" href="https://github.com/vale981/bitwig-midi-comp/releases">Download</a>
+      <a class="button secondary" href="https://github.com/vale981/bitwig-midi-comp">Source on GitHub</a>
+      <span class="badge">Alpha</span>
+    </div>
+  </header>
+
+  <figure class="shot">
+    <img src="screenshots/session-rose-pine-dawn.png" width="2560" height="1520"
+         alt="The companion app: a comp lane on top, six recorded takes below, with ranges of different takes selected">
+  </figure>
+
+  <section>
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <div>
+          <h3><span class="number">1</span>Pick a clip</h3>
+          <p>Select a MIDI clip in the arranger or the clip launcher and start comping it in
+            the companion app. Its current notes become the first take.</p>
+        </div>
+        <figure class="shot"><img src="screenshots/start.png" width="2560" height="900" loading="lazy"
+             alt="Start screen with the selected launcher and arranger clips"></figure>
+      </div>
+      <div class="step">
+        <div>
+          <h3><span class="number">2</span>Record loop passes</h3>
+          <p>Set the loop over the clip and press Record. Every pass becomes a take. The
+            passes show up while you play; afterwards the takes keep Bitwig's exact notes
+            wherever Bitwig kept them.</p>
+        </div>
+        <figure class="shot"><img src="screenshots/recording.png" width="2560" height="1520" loading="lazy"
+             alt="Two passes being recorded appear as lanes below the existing takes"></figure>
+      </div>
+      <div class="step">
+        <div>
+          <h3><span class="number">3</span>Drag across takes</h3>
+          <p>Drag across a take to use it for that range, snapped to the grid. The clip in
+            Bitwig is rewritten as you edit, so you hear the comp right away. (Shown here in
+            Bitwig's stock colors.)</p>
+        </div>
+        <figure class="shot"><img src="screenshots/session-bitwig-default.png" width="2560" height="1520" loading="lazy"
+             alt="Comp lane assembled from ranges of four different takes, in Bitwig's stock colors"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What it does</h2>
+    <div class="features">
+      <div class="feature">
+        <h3>Every pass a take</h3>
+        <p>Without overdub, Bitwig keeps only the latest pass. The companion reads your
+          keyboard with timestamps and rebuilds the passes Bitwig overwrote, typically within
+          a millisecond.</p>
+      </div>
+      <div class="feature">
+        <h3>Full note data</h3>
+        <p>Comps carry every note attribute the API exposes: velocities, timbre, pressure,
+          chance, repeats and more, at up to 1/4096 beat resolution.</p>
+      </div>
+      <div class="feature">
+        <h3>Saved comps and versions</h3>
+        <p>Comps are saved locally as you work. Name them, keep recordings and the comps cut
+          from them apart, and continue in a copy of the clip.</p>
+      </div>
+      <div class="feature">
+        <h3>Looks like Bitwig</h3>
+        <p>The app follows the colors of the
+          <a href="https://github.com/Berikai/bitwig-theme-editor">Bitwig Theme Editor</a>
+          and picks up changes without a restart.</p>
+      </div>
+      <div class="feature">
+        <h3>Linux, macOS, Windows</h3>
+        <p>A Bitwig controller extension plus a native companion app, built for all three
+          platforms. Nix users get a flake.</p>
+      </div>
+      <div class="feature">
+        <h3>Open</h3>
+        <p>MIT licensed. The extension serves a small local HTTP API, documented for anyone
+          who wants to build on it.</p>
+      </div>
+    </div>
+    <figure class="shot" style="margin-top: 28px;">
+      <img src="screenshots/comps.png" width="1720" height="760" loading="lazy"
+           alt="Saved comps: recording sets on the left, the comps cut from the selected set on the right">
+    </figure>
+    <figcaption>Saved comps, grouped by the recordings they were cut from.</figcaption>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <ol class="install">
+      <li>Download <code>MidiComp.bwextension</code> and the companion for your platform from
+        the <a href="https://github.com/vale981/bitwig-midi-comp/releases">releases</a>.</li>
+      <li>Copy the extension to <code>~/Bitwig Studio/Extensions/</code> and add
+        <em>Utility › MIDI Comp</em> under <em>Settings › Controllers</em>.</li>
+      <li>Start the companion. It finds the extension on its own; pick your keyboard in the
+        toolbar.</li>
+    </ol>
+    <p class="note">This is an alpha, largely written with the help of LLMs. It works for its
+      author on Linux with arranger clips; other setups are less tested. Saved comps make it
+      hard to lose work, and bug reports are welcome on
+      <a href="https://github.com/vale981/bitwig-midi-comp/issues">GitHub</a>. The
+      <a href="https://github.com/vale981/bitwig-midi-comp#readme">README</a> has the details,
+      including how to share one keyboard between Bitwig and the companion.</p>
+  </section>
+</main>
+<footer>
+  MIDI Comp is MIT licensed. Bitwig and Bitwig Studio are trademarks of Bitwig GmbH; this
+  project is not affiliated with or endorsed by Bitwig.
+</footer>
+</body>
+</html>
