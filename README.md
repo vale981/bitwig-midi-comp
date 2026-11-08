@@ -2,7 +2,7 @@
 
 Comping for MIDI clips in Bitwig Studio: record loop passes into a clip, then cut the passes
 together in a companion app and hear the comp while you edit.
-[Project page](https://bitwig-comp.protagon.space/).
+[Project page](http://bitwig-comp.protagon.space/).
 
 Even though I write code for a living, this is purely vibe-coded so take it for what it is. Without LLMs I'd never have taken on this task and so far the tool seems to be quite useful. Feel free to report bugs :).
 
