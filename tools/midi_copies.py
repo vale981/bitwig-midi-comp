@@ -172,9 +172,13 @@ def plan(clients: list[Client], state: dict[str, dict], now: float,
                   if k not in sources and v.get("copy") in copies}
         free = [c for c in sorted(copies, key=copy_sort_key)
                 if c not in taken and c not in absent]
+        reused_from = None
         if not free:
             # Reuse the copy of the device seen least recently.
             free = sorted((c for c in absent if c not in taken), key=lambda c: absent[c])
+            if free:
+                reused_from = next(k for k, v in state.items()
+                                   if k not in sources and v.get("copy") == free[0])
         if not free:
             messages.append(f"No virtual port left for {key}; load snd-virmidi with more "
                             "devices")
@@ -185,7 +189,9 @@ def plan(clients: list[Client], state: dict[str, dict], now: float,
             del state[k]
         state[key] = {"copy": copy, "seen": now}
         taken[copy] = key
-        messages.append(f"{key} -> {copy_label(copy)}")
+        messages.append(f"{key} -> {copy_label(copy)}" + (
+            f" (taken over from {reused_from}, which is not connected; there are only "
+            f"{len(copies)} virtual ports)" if reused_from else ""))
 
     connect: list[tuple[Address, Address]] = []
     disconnect: list[tuple[Address, Address]] = []

@@ -71,6 +71,8 @@ class MidiCopiesTest(unittest.TestCase):
         result = plan(parse_clients(PROC), state, 100.0, {"Midi Through"})
         self.assertEqual(result.state[AXIOM_2]["copy"], "Virtual Raw MIDI 16-1")
         self.assertNotIn("Launchpad:Launchpad MIDI 1", result.state)
+        self.assertTrue(any("taken over from Launchpad:Launchpad MIDI 1" in m
+                            for m in result.messages))
 
     def test_describe(self):
         lines = describe(parse_clients(PROC))
