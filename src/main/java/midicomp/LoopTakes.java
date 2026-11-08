@@ -103,6 +103,35 @@ final class LoopTakes
       final double toleranceBeats,
       final int lastPassToKeep)
    {
+      return assemble(recorded, played, stepSize, loopBeats, toleranceBeats, lastPassToKeep, 0);
+   }
+
+   /**
+    * Assembles the takes as :meth:`assemble` does, preferring the offset nearest ``priorOffset``
+    * when several fit about equally well, as with regular patterns (16th-note hi-hats match a
+    * shift by a 16th almost as well as the true offset).
+    *
+    * Args:
+    *    recorded: the notes Bitwig recorded, in grid coordinates.
+    *    played: the notes played during recording, in the order they were played.
+    *    stepSize: grid step length in beats.
+    *    loopBeats: loop length in beats.
+    *    toleranceBeats: largest position difference for a match.
+    *    lastPassToKeep: index of the last pass to keep.
+    *    priorOffset: expected offset in beats, for example the one measured last time.
+    *
+    * Returns:
+    *    The takes.
+    */
+   static Result assemble(
+      final List<NoteData> recorded,
+      final List<KeyboardEvents.PlayedNote> played,
+      final double stepSize,
+      final double loopBeats,
+      final double toleranceBeats,
+      final int lastPassToKeep,
+      final double priorOffset)
+   {
       if (played.isEmpty() || loopBeats <= 0)
          return new Result(recorded.isEmpty() ? List.of() : List.of(List.copyOf(recorded)), 0, 0,
             recorded.size(), 0, 0, 0, 0);
@@ -119,7 +148,8 @@ final class LoopTakes
          recordedByKey.computeIfAbsent(recorded.get(r).key(), k -> new ArrayList<>()).add(r);
 
       // 1. Rough offset (modulo the loop) and a first matching to refine it.
-      final double rough = estimateOffset(recorded, played, playedByKey, stepSize, loopBeats);
+      final double rough =
+         estimateOffset(recorded, played, playedByKey, stepSize, loopBeats, priorOffset);
       final int[] firstMatch = match(recorded, played, recordedByKey, playedByKey,
          p -> p.loopBeat(), rough, stepSize, loopBeats, toleranceBeats);
       final List<Double> differences = new ArrayList<>();
@@ -233,15 +263,17 @@ final class LoopTakes
 
    /**
     * Estimates the offset (modulo the loop length) as the most common difference between a
-    * recorded and a played note of the same key: histogram with 1/32 beat bins, refined by
-    * averaging the differences near the peak.
+    * recorded and a played note of the same key: histogram with 1/32 beat bins, smoothed over
+    * neighbouring bins, refined by averaging the differences near the peak. Of peaks within
+    * three quarters of the highest, the one nearest ``prior`` wins.
     */
    private static double estimateOffset(
       final List<NoteData> recorded,
       final List<KeyboardEvents.PlayedNote> played,
       final Map<Integer, List<Integer>> playedByKey,
       final double stepSize,
-      final double loopBeats)
+      final double loopBeats,
+      final double prior)
    {
       final double bin = 1.0 / 32;
       final long bins = Math.max(1, Math.round(loopBeats / bin));
@@ -258,8 +290,31 @@ final class LoopTakes
       }
       if (histogram.isEmpty())
          return 0;
-      final long peak = histogram.entrySet().stream()
-         .max(Map.Entry.comparingByValue()).orElseThrow().getKey();
+      final Map<Long, Integer> smoothed = new HashMap<>();
+      for (final long b : histogram.keySet())
+         smoothed.put(b, histogram.getOrDefault((b - 1 + bins) % bins, 0)
+            + histogram.get(b) + histogram.getOrDefault((b + 1) % bins, 0));
+      final int highest = smoothed.values().stream().max(Integer::compare).orElse(0);
+      long peak = -1;
+      double nearest = Double.MAX_VALUE;
+      for (final Map.Entry<Long, Integer> e : smoothed.entrySet())
+      {
+         // Only local maxima compete, so the prior picks between peaks, not within one.
+         final int value = e.getValue();
+         final int left = smoothed.getOrDefault((e.getKey() - 1 + bins) % bins, 0);
+         final int right = smoothed.getOrDefault((e.getKey() + 1) % bins, 0);
+         if (value * 4 < highest * 3 || value < left || value <= right)
+            continue;
+         final double distance = Math.abs(signedDistance(e.getKey() * bin, prior, loopBeats));
+         if (distance < nearest)
+         {
+            nearest = distance;
+            peak = e.getKey();
+         }
+      }
+      if (peak < 0) // a plateau without a strict maximum: the highest bin
+         peak = smoothed.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow()
+            .getKey();
       final double center = peak * bin;
       double sum = 0;
       int count = 0;
@@ -298,7 +353,11 @@ final class LoopTakes
       return wrapped + Math.round((median - wrapped) / loopBeats) * loopBeats;
    }
 
-   /** Matches recorded to played notes per key in order of loop position (see :meth:`align`). */
+   /**
+    * Matches recorded to played notes per key in order of loop position (see :meth:`align`).
+    * Bitwig keeps the latest pass at each position, so of played notes about equally close, the
+    * one from the later pass is preferred: older passes cost up to half the tolerance extra.
+    */
    private static int[] match(
       final List<NoteData> recorded,
       final List<KeyboardEvents.PlayedNote> played,
@@ -323,7 +382,19 @@ final class LoopTakes
             .mapToDouble(r -> wrap(recorded.get(r).x() * stepSize - offset, loopBeats)).toArray();
          final double[] pBeat =
             ps.stream().mapToDouble(q -> position.applyAsDouble(played.get(q))).toArray();
-         final int[] m = align(rBeat, pBeat, toleranceBeats, loopBeats);
+         int newest = 0;
+         int oldest = Integer.MAX_VALUE;
+         for (final int q : ps)
+         {
+            newest = Math.max(newest, played.get(q).pass());
+            oldest = Math.min(oldest, played.get(q).pass());
+         }
+         final int span = Math.max(1, newest - oldest);
+         final int latest = newest;
+         final double[] penalty = ps.stream()
+            .mapToDouble(q -> 0.5 * toleranceBeats * (latest - played.get(q).pass()) / span)
+            .toArray();
+         final int[] m = align(rBeat, pBeat, penalty, toleranceBeats, loopBeats);
          for (int i = 0; i < rs.size(); i++)
             if (m[i] >= 0)
                partner[rs.get(i)] = ps.get(m[i]);
@@ -358,6 +429,29 @@ final class LoopTakes
       final double tolerance,
       final double loopBeats)
    {
+      return align(recorded, played, new double[played.length], tolerance, loopBeats);
+   }
+
+   /**
+    * Like :meth:`align`, with an extra cost per played position for matching it.
+    *
+    * Args:
+    *    recorded: recorded positions, ascending.
+    *    played: played positions, ascending.
+    *    penalty: extra cost of matching each played position.
+    *    tolerance: largest distance of a match.
+    *    loopBeats: loop length, for distances across the loop end.
+    *
+    * Returns:
+    *    For each recorded position the index of its played partner, or ``-1``.
+    */
+   static int[] align(
+      final double[] recorded,
+      final double[] played,
+      final double[] penalty,
+      final double tolerance,
+      final double loopBeats)
+   {
       final int n = recorded.length;
       final int m = played.length;
       final double[][] cost = new double[n + 1][m + 1];
@@ -378,9 +472,9 @@ final class LoopTakes
                how = 1;
             }
             final double d = Math.abs(signedDistance(recorded[i - 1], played[j - 1], loopBeats));
-            if (d <= tolerance && cost[i - 1][j - 1] + d < best)
+            if (d <= tolerance && cost[i - 1][j - 1] + d + penalty[j - 1] < best)
             {
-               best = cost[i - 1][j - 1] + d;
+               best = cost[i - 1][j - 1] + d + penalty[j - 1];
                how = 2;
             }
             cost[i][j] = best;

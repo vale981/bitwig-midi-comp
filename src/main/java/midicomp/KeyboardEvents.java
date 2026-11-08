@@ -124,6 +124,8 @@ final class KeyboardEvents
       {
       }
       final Map<Integer, Open> open = new HashMap<>();
+      // Note-offs still due for hits that a later hit on the same key already ended.
+      final Map<Integer, Integer> staleOffs = new HashMap<>();
       final List<long[]> finished = new ArrayList<>(); // {start, end, channel, key, vel, rel}
       for (final Message m : sorted)
       {
@@ -136,7 +138,19 @@ final class KeyboardEvents
          final boolean off = type == 0x80 || (type == 0x90 && m.data2() == 0);
          if (on && m.time() >= from)
          {
-            open.put(cell, new Open(m.time(), m.data2()));
+            // A new hit before the previous one was released (drum pads often send note-off
+            // after a fixed time): the previous note ends here.
+            final Open previous = open.put(cell, new Open(m.time(), m.data2()));
+            if (previous != null)
+            {
+               finished.add(new long[] { previous.time(), m.time(), channel, m.data1(),
+                  previous.velocity(), 64 });
+               staleOffs.merge(cell, 1, Integer::sum);
+            }
+         }
+         else if (off && staleOffs.getOrDefault(cell, 0) > 0)
+         {
+            staleOffs.merge(cell, -1, Integer::sum);
          }
          else if (off)
          {

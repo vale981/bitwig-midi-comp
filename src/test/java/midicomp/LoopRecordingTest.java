@@ -322,4 +322,60 @@ class LoopRecordingTest
       assertEquals(1, result.dropped());
       assertEquals(0, result.rebuilt());
    }
+
+   @Test
+   void fastRepeatedHitsBeforeTheirReleaseAreAllKept()
+   {
+      final TransportTimeline timeline = new TransportTimeline();
+      timeline.start(Long.MIN_VALUE);
+      for (long t = 0; t < 4 * SECOND; t += SECOND / 100)
+         timeline.add(t, LOOP_START + t * BEATS_PER_NANO);
+      // Closed hi-hat every 100 ms, each released 150 ms after its hit.
+      final KeyboardEvents keyboard = new KeyboardEvents();
+      final List<long[]> messages = new ArrayList<>();
+      for (int i = 0; i < 8; i++)
+      {
+         messages.add(new long[] { i * 100_000_000L, 0x99, 42, 100 });
+         messages.add(new long[] { i * 100_000_000L + 150_000_000L, 0x89, 42, 0 });
+      }
+      messages.sort((a, b) -> Long.compare(a[0], b[0]));
+      for (final long[] m : messages)
+         keyboard.add(m[0], (int) m[1], (int) m[2], (int) m[3]);
+
+      final List<KeyboardEvents.PlayedNote> notes =
+         keyboard.notes(0, 2 * SECOND, timeline, LOOP_START, LOOP, TEMPO);
+      assertEquals(8, notes.size());
+      for (int i = 0; i < 8; i++)
+         assertEquals(i * 0.2, notes.get(i).loopBeat(), 1e-6);
+      assertEquals(0.2, notes.get(0).durationBeats(), 1e-6); // ended by the next hit
+      assertEquals(0.3, notes.get(7).durationBeats(), 1e-6); // its own release
+   }
+
+   @Test
+   void regularHiHatsKeepTheirPositions()
+   {
+      // Three passes of 16th hi-hats with a little human timing; Bitwig kept the last pass.
+      final Random random = new Random(21);
+      final List<KeyboardEvents.PlayedNote> played = new ArrayList<>();
+      final List<NoteData> kept = new ArrayList<>();
+      for (int pass = 0; pass < 3; pass++)
+         for (int i = 0; i < 32; i++)
+         {
+            final Truth t = new Truth(pass, 42, 0.05 + i * 0.25 + (random.nextDouble() - 0.5) * 0.03,
+               0.6 + random.nextDouble() * 0.3);
+            played.add(seen(t, random));
+            if (pass == 2)
+               kept.add(recorded(t));
+         }
+
+      // The previous recording measured the clip offset with the 7.5 ms delay.
+      final double prior = CLIP_OFFSET - 0.0075 * TEMPO / 60;
+      final LoopTakes.Result result =
+         LoopTakes.assemble(kept, played, STEP, LOOP, 0.08 * TEMPO / 60, Integer.MAX_VALUE, prior);
+      assertEquals(CLIP_OFFSET - 0.0075 * TEMPO / 60, result.offsetBeats(), 0.003);
+      assertEquals(3, result.passes().size());
+      for (final List<NoteData> take : result.passes())
+         assertEquals(32, take.size());
+      assertEquals(32, result.matched());
+   }
 }

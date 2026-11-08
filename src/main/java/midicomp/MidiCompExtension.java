@@ -1147,7 +1147,7 @@ public class MidiCompExtension extends ControllerExtension
       recordingOnePass = false;
 
       final LoopTakes.Result result = LoopTakes.assemble(recorded, played, stepSize, loopBeats,
-         MATCH_SECONDS * tempo / 60.0, lastPass);
+         MATCH_SECONDS * tempo / 60.0, lastPass, previewOffsetBeats);
       if (result.dropped() > 0)
          log(String.format("Left out %d notes played after the last pass (pass %d)",
             result.dropped(), lastPass + 1));

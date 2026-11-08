@@ -189,11 +189,15 @@ the step size, so `import` can rescale positions if the timing resolution change
   transport position against `System.nanoTime()`; each pass is fitted as a line with the
   tempo's slope, which averages out the screen-rate updates. Each keyboard note from `played` is
   placed in a pass and loop position with it. When recording ends, recorded notes are matched to
-  played notes per key, in order of loop position (no crossings), within 80 ms. Matched recorded
+  played notes per key, in order of loop position (no crossings), within 80 ms; of played notes
+  about equally close, the later pass wins, since Bitwig keeps the latest pass at each position.
+  A hit on a key that is still held (drum pads often release after a fixed time) ends the
+  previous note there. Matched recorded
   notes go to their played note's pass unchanged; unmatched played notes (overwritten passes) are
   rebuilt with attributes from a recorded note; unmatched recorded notes go to the last pass. The
   offset between played and recorded positions is estimated from the recording; rounded to a
-  sixteenth note it is the loop start in the clip, and the rest is a constant delay that is
+  sixteenth note it is the loop start in the clip (of offsets that fit about equally well, as with
+  regular hi-hats, the one nearest the previous recording's), and the rest is a constant delay that is
   removed from the played notes before passes are assigned. The log reports the counts, the
   delay, the remaining deviation and the clock offset. A possible refinement is to time the
   transport by Bitwig's MIDI clock output (timestamped by the companion's MIDI driver like the
