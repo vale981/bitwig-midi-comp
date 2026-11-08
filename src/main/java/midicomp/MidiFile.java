@@ -33,14 +33,12 @@ final class MidiFile
     *    notes: the comp's notes, in grid coordinates; muted notes are left out.
     *    controls: the comp's control messages.
     *    stepSize: grid step length in beats.
-    *    tempo: tempo in beats per minute.
     *    lengthSteps: length of the comp; the file ends there or after its last event.
     */
    static byte[] write(
       final List<NoteData> notes,
       final List<ControlEvent> controls,
       final double stepSize,
-      final double tempo,
       final int lengthSteps)
    {
       final int ppq = (int) Math.max(96, Math.min(MAX_PPQ, Math.round(1.0 / stepSize)));
@@ -66,11 +64,9 @@ final class MidiFile
       }
       events.sort(Comparator.comparingLong(Event::tick).thenComparingInt(Event::order));
 
+      // No tempo event: positions are in beats, and Bitwig asks whether to take over a file's
+      // tempo on every import.
       final ByteArrayOutputStream track = new ByteArrayOutputStream();
-      final int micros = (int) Math.round(60_000_000.0 / Math.max(1.0, tempo));
-      writeVarLen(track, 0);
-      track.writeBytes(new byte[] { (byte) 0xFF, 0x51, 0x03, (byte) (micros >> 16),
-         (byte) (micros >> 8), (byte) micros });
       long last = 0;
       for (final Event e : events)
       {

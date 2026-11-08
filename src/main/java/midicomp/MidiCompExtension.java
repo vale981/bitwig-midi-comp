@@ -1378,8 +1378,8 @@ public class MidiCompExtension extends ControllerExtension
       final List<NoteData> notes = new ArrayList<>();
       for (final CompModel.CompNote n : model.render(stepSize))
          notes.add(n.note());
-      java.nio.file.Files.write(file, MidiFile.write(notes, model.renderControls(), stepSize,
-         transport.tempo().value().getRaw(), model.length()));
+      java.nio.file.Files.write(file,
+         MidiFile.write(notes, model.renderControls(), stepSize, model.length()));
       return file;
    }
 
