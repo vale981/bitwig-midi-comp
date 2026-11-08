@@ -98,6 +98,7 @@ final class EditableClip
       {
          if (!wanted.containsKey(current.cellKey()))
          {
+            touch();
             clip.clearStep(current.channel(), current.x(), current.key());
             removed.add(current);
          }
@@ -128,6 +129,7 @@ final class EditableClip
     */
    void clear(final NoteData note)
    {
+      touch();
       clip.clearStep(note.channel(), note.x(), note.key());
    }
 
@@ -217,6 +219,7 @@ final class EditableClip
    {
       final List<NoteData> removed = notes.all();
       pendingAttributes.clear();
+      touch();
       clip.clearSteps();
       for (final NoteData n : all)
          write(n);
@@ -281,6 +284,8 @@ final class EditableClip
 
    private void write(final NoteData note)
    {
+      // Bitwig reports the new note a while later: not settled before then.
+      touch();
       pendingAttributes.put(note.cellKey(), note);
       clip.setStep(note.channel(), note.x(), note.key(), note.midiVelocity(), note.duration());
    }
