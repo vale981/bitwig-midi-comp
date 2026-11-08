@@ -334,7 +334,7 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::SetItemTooltip(
             "Write the comp as a MIDI file, with its CC (hi-hat pedal, sustain, pitch bend), and "
             "load it into Bitwig:\ninto the comp clip for launcher clips, into a free launcher "
-            "slot of the comp track for arranger clips\n(drag it over the arranger clip from "
+            "slot of the comp track for arranger clips\n(copy it over the arranger clip from "
             "there). The editor writes notes only; this is how CC gets into the clip.");
         ImGui::EndDisabled();
     }

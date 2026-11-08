@@ -72,8 +72,9 @@ Two parts:
    are kept with each take, and a comp takes each cut's messages, starting with the take's
    controller values at the cut. *Load into Bitwig* writes the comp with them as a MIDI file and
    loads it: launcher comps directly into their slot, arranger comps into a free launcher slot of
-   the comp track, from where you drag them over the arranger clip. The files are kept in
-   `~/.midicomp/midi`. *Revert* restores the clip as it
+   the comp track, from where you copy them over the arranger clip (copy and paste in Bitwig, or
+   drag). The extension cannot take this step itself: copy and paste through the API lose the
+   clip's automation. The files are kept in `~/.midicomp/midi`. *Revert* restores the clip as it
    was before the session and ends it.
 
 Takes recorded elsewhere (another track or launcher slot) can be added with *Add take*, which
