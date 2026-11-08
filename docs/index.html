@@ -153,9 +153,9 @@
       <div class="step">
         <div>
           <h3><span class="number">2</span>Record loop passes</h3>
-          <p>Set the loop over the clip and press Record. Every pass becomes a take. The
-            passes show up while you play; afterwards the takes keep Bitwig's exact notes
-            wherever Bitwig kept them.</p>
+          <p>Set the loop over the clip and press Record. Each time the loop comes around,
+            the pass becomes a new take, and you can watch the takes appear while you
+            play.</p>
         </div>
         <figure class="shot"><img src="screenshots/recording.png" width="2560" height="1520" loading="lazy"
              alt="Two passes being recorded appear as lanes below the existing takes"></figure>
@@ -163,8 +163,8 @@
       <div class="step">
         <div>
           <h3><span class="number">3</span>Drag across takes</h3>
-          <p>Drag across a take to use it for that range, snapped to the grid. The clip in
-            Bitwig is rewritten as you edit, so you hear the comp right away.</p>
+          <p>Drag across a take to use that part of it, snapped to the grid. The clip in
+            Bitwig follows every change, so you hear the result right away.</p>
         </div>
         <figure class="shot"><img src="screenshots/session-detail.png" width="1480" height="1000" loading="lazy"
              alt="The comp lane takes its first two bars from pass 1 and the next from pass 4"></figure>
@@ -177,19 +177,19 @@
     <div class="features">
       <div class="feature">
         <h3>Every pass a take</h3>
-        <p>Without overdub, Bitwig keeps only the latest pass. The companion reads your
-          keyboard with timestamps and rebuilds the passes Bitwig overwrote, typically within
-          a millisecond.</p>
+        <p>When you record over a loop, Bitwig normally keeps only the last pass. MIDI Comp
+          listens to your keyboard while you play and brings the earlier passes back, with
+          timing accurate to about a millisecond.</p>
       </div>
       <div class="feature">
-        <h3>Full note data</h3>
-        <p>Comps carry every note attribute the API exposes: velocities, timbre, pressure,
-          chance, repeats and more, at up to 1/4096 beat resolution.</p>
+        <h3>Nothing gets lost</h3>
+        <p>Comps keep everything about each note: velocity, timbre, pressure, chance,
+          repeats and its exact timing.</p>
       </div>
       <div class="feature">
         <h3>Saved comps and versions</h3>
-        <p>Comps are saved locally as you work. Name them, keep recordings and the comps cut
-          from them apart, and continue in a copy of the clip.</p>
+        <p>Your comps are saved as you work. Name them, try different comps of the same
+          recordings, and carry a comp over into a copy of the clip.</p>
       </div>
       <div class="feature">
         <h3>Looks like Bitwig</h3>
@@ -199,13 +199,13 @@
       </div>
       <div class="feature">
         <h3>Linux, macOS, Windows</h3>
-        <p>A Bitwig controller extension plus a native companion app, built for all three
-          platforms. Nix users get a flake.</p>
+        <p>A small Bitwig extension and a separate app that runs next to Bitwig, for all
+          three systems.</p>
       </div>
       <div class="feature">
-        <h3>Open</h3>
-        <p>MIT licensed. The extension serves a small local HTTP API, documented for anyone
-          who wants to build on it.</p>
+        <h3>Free and open source</h3>
+        <p>MIT licensed. The source is on GitHub, with documentation for anyone who wants to
+          build on it.</p>
       </div>
     </div>
     <figure class="shot" style="margin-top: 28px;">
@@ -220,10 +220,11 @@
     <ol class="install">
       <li>Download <code>MidiComp.bwextension</code> and the companion for your platform from
         the <a href="https://github.com/vale981/bitwig-midi-comp/releases">releases</a>.</li>
-      <li>Copy the extension to <code>~/Bitwig Studio/Extensions/</code> and add
-        <em>Utility › MIDI Comp</em> under <em>Settings › Controllers</em>.</li>
-      <li>Start the companion. It finds the extension on its own; pick your keyboard in the
-        toolbar.</li>
+      <li>Copy the extension into Bitwig's extensions folder
+        (<code>~/Bitwig Studio/Extensions/</code>) and add <em>MIDI Comp</em> under
+        <em>Settings › Controllers</em> (in the <em>Utility</em> group).</li>
+      <li>Start the companion app. It connects to Bitwig on its own; pick your keyboard in
+        its toolbar.</li>
     </ol>
     <p class="note">This is an alpha, largely written with the help of LLMs. It works for its
       author on Linux with arranger clips; other setups are less tested. Saved comps make it
