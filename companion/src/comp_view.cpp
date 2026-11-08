@@ -354,15 +354,6 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         }
         if (state->session->source == "arranger") {
             ImGui::SameLine();
-            if (ImGui::Button("Paste into arranger"))
-                client.send("pasteIntoArranger");
-            ImGui::SetItemTooltip(
-                "Experimental: copy the clip loaded with Load into Bitwig and paste it over the "
-                "arranger clip,\nthrough Bitwig's clipboard. Each step is logged; undo in Bitwig "
-                "if it lands elsewhere.");
-        }
-        if (state->session->source == "arranger") {
-            ImGui::SameLine();
             if (ImGui::Button("Play in launcher"))
                 client.send("playInLauncher");
             ImGui::SetItemTooltip(
