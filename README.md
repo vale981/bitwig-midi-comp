@@ -153,6 +153,11 @@ source in use: Bitwig's MIDI clock, or without it the extension's view of the tr
 is coarser. Live MIDI is not sample-accurate: expect a few milliseconds of variation, more
 without MIDI clock. Notes already sounding where playback starts are not played.
 
+**Clear the clip's automation first.** The preview empties the clip's notes, but the API cannot
+reach its automation: CC automation in the clip (recorded with the passes, or loaded with *Load
+into Bitwig*) keeps playing and fights the preview's controllers. Before previewing a comp with
+pedals or other controllers, delete the clip's automation lanes in Bitwig.
+
 ### Pedals and controllers (CC)
 
 Hi-hat pedals, sustain pedals, mod wheels and pitch bend send control messages rather than

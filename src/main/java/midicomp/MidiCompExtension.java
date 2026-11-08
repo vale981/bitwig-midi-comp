@@ -1780,7 +1780,8 @@ public class MidiCompExtension extends ControllerExtension
          auditioning = true;
          previewNotesHeard = 0;
          setMonitoring(track, true);
-         log("Preview on: the comp clip is empty, the companion plays the comp to the track");
+         log("Preview on: the comp clip is empty, the companion plays the comp to the track. "
+            + "Automation in the clip still plays: delete its automation lanes in Bitwig");
          return Result.ok("Previewing: the companion plays the comp");
       }
       auditioning = false;

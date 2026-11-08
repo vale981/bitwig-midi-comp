@@ -1090,7 +1090,10 @@ void CompView::drawPreviewButton(ApiClient& client, const Session& session) {
         "MIDI\ninto the comp track while Bitwig plays, and the clip stays empty. Ending the "
         "preview writes\nthe comp back. The companion's port \"MIDI Comp\" must be the "
         "track's input\n(Linux: its VirMIDI copy; Windows: a loopMIDI port named \"MIDI "
-        "Comp\"); Bitwig's MIDI clock\nsent to that device improves the timing.%s",
+        "Comp\"); Bitwig's MIDI clock\nsent to that device improves the timing.\n\n"
+        "Delete the clip's automation lanes in Bitwig first: the preview empties the notes, but "
+        "the API\ncannot reach automation, which would keep playing alongside the preview's "
+        "controllers.%s",
         status.c_str());
 }
 
