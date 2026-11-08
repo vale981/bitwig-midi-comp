@@ -213,6 +213,13 @@ class CompView {
      */
     void drawSelectOverlay(const State& state, ImVec2 origin, ImVec2 size) const;
 
+    /** Returns the current session's own save, if it has been saved yet. */
+    [[nodiscard]] const SavedComp* currentSave() const;
+    /** Marks a list row (cursor position ``rowStart``) as the comp being worked on. */
+    void drawCurrentMark(ImVec2 rowStart, float rowHeight) const;
+    /** Draws the name fields of the current recordings and comp. */
+    void drawNameFields(ApiClient& client);
+
     [[nodiscard]] int stepAt(const Layout& layout, float screenX) const;
     [[nodiscard]] int gridSteps(const State& state) const;
     void commitRange(ApiClient& client, const State& state, int lane, int a, int b) const;
@@ -261,7 +268,10 @@ class CompView {
     std::map<std::string, std::string> recordingNames_;  ///< takesKey to name.
     std::array<char, 128> recordingNameBuffer_{};
     std::array<char, 128> savedNameBuffer_{};
-    bool deleteArmed_ = false;     ///< "Delete" was clicked once.
+    std::string currentRecordingKey_;  ///< takesKey shown in the toolbar's recording field.
+    std::array<char, 128> currentRecordingBuffer_{};  ///< The toolbar's recording field.
+    bool recordingFieldActive_ = false;               ///< It is being edited.
+    bool deleteArmed_ = false;                        ///< "Delete" was clicked once.
     bool openSavedComps_ = false;  ///< Open the saved-comps popup on the next frame.
     float uiScale_ = 1.0f;
     std::optional<float> uiScaleRequest_;

@@ -293,13 +293,7 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 11.0f);
-        ImGui::InputTextWithHint("##compName", "Comp name", nameBuffer_.data(), nameBuffer_.size());
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            compName_ = nameBuffer_.data();
-            saveNow(client);
-        }
-        ImGui::SetItemTooltip("Name of this comp in the list of saved comps");
+        drawNameFields(client);
         ImGui::SameLine();
         if (ImGui::Button("Saved comps..."))
             ImGui::OpenPopup("savedComps");
@@ -1698,6 +1692,7 @@ void CompView::drawSavedComps(ApiClient& client, const State& state) {
     ImGui::TextDisabled("(otherwise this clip, by title or notes)");
 
     const SavedComp* chosen = nullptr;
+    const SavedComp* current = currentSave();
     if (recordingSets_.empty()) {
         ImGui::TextDisabled("No saved comps yet. Comps are saved shortly after every change.");
     } else if (ImGui::BeginTable("savedComps", 2,
@@ -1732,12 +1727,16 @@ void CompView::drawSavedComps(ApiClient& client, const State& state) {
                 syncNameFields();
             }
             const ImVec2 after = ImGui::GetCursorPos();
-            ImGui::SetCursorPos(ImVec2(start.x + 4.0f * scale, start.y));
+            const bool isCurrent = current != nullptr && set.takesKey == current->takesKey;
+            if (isCurrent)
+                drawCurrentMark(start, rowHeight);
+            ImGui::SetCursorPos(ImVec2(start.x + 8.0f * scale, start.y));
             ImGui::BeginGroup();
             ImGui::TextUnformatted(title.c_str());
             const std::size_t cuts = set.comps.size();
-            ImGui::TextDisabled("%s \u00b7 %d takes \u00b7 %zu comp%s", set.newest().clip.c_str(),
-                                set.newest().takes, cuts, cuts == 1 ? "" : "s");
+            ImGui::TextDisabled("%s \u00b7 %d takes \u00b7 %zu comp%s%s", set.newest().clip.c_str(),
+                                set.newest().takes, cuts, cuts == 1 ? "" : "s",
+                                isCurrent ? " \u00b7 current" : "");
             ImGui::EndGroup();
             ImGui::SetCursorPos(after);
             ImGui::PopID();
@@ -1750,6 +1749,8 @@ void CompView::drawSavedComps(ApiClient& client, const State& state) {
             const RecordingSet& set = recordingSets_[static_cast<std::size_t>(savedSet_)];
             store_->setRecordingName(set.takesKey, recordingNameBuffer_.data());
             recordingNames_[set.takesKey] = recordingNameBuffer_.data();
+            if (set.takesKey == currentRecordingKey_)
+                currentRecordingBuffer_ = recordingNameBuffer_;
         }
 
         // Comps: the ways these takes were cut.
@@ -1761,7 +1762,11 @@ void CompView::drawSavedComps(ApiClient& client, const State& state) {
             std::string detail = comp.cutsSummary + " \u00b7 " + formatTime(comp.savedAt);
             if (comp.clip != recordingSets_[static_cast<std::size_t>(savedSet_)].newest().clip)
                 detail += " \u00b7 " + comp.clip;
-            if (!comp.fingerprint.empty() && comp.fingerprint == session.fingerprint)
+            const bool isCurrent = current != nullptr && comp.takesKey == current->takesKey &&
+                                   comp.cutsKey == current->cutsKey;
+            if (isCurrent)
+                detail += " \u00b7 current";
+            else if (!comp.fingerprint.empty() && comp.fingerprint == session.fingerprint)
                 detail += " \u00b7 in this clip";
             ImGui::PushID(i);
             const ImVec2 start = ImGui::GetCursorPos();
@@ -1780,7 +1785,9 @@ void CompView::drawSavedComps(ApiClient& client, const State& state) {
                 }
             }
             const ImVec2 after = ImGui::GetCursorPos();
-            ImGui::SetCursorPos(ImVec2(start.x + 4.0f * scale, start.y));
+            if (isCurrent)
+                drawCurrentMark(start, rowHeight);
+            ImGui::SetCursorPos(ImVec2(start.x + 8.0f * scale, start.y));
             ImGui::BeginGroup();
             ImGui::TextUnformatted(comp.name.empty() ? "Unnamed comp" : comp.name.c_str());
             ImGui::TextDisabled("%s", detail.c_str());
@@ -1839,6 +1846,66 @@ void CompView::drawSavedComps(ApiClient& client, const State& state) {
     ImGui::EndPopup();
 }
 
+void CompView::drawNameFields(ApiClient& client) {
+    // The recordings (takes) being cut, then the comp: "Recorded Nov 08, 15:32 > Verse comp".
+    const SavedComp* current = currentSave();
+    const std::string key = current != nullptr ? current->takesKey : std::string();
+    if (key != currentRecordingKey_ && !recordingFieldActive_) {
+        currentRecordingKey_ = key;
+        currentRecordingBuffer_.fill('\0');
+        if (!key.empty() && store_ != nullptr)
+            store_->recordingName(key).copy(currentRecordingBuffer_.data(),
+                                            currentRecordingBuffer_.size() - 1);
+    }
+    // Unnamed: titled by the first save of these recordings, as in the list of saved comps.
+    std::string hint = "Recording (not saved yet)";
+    if (current != nullptr) {
+        std::int64_t first = current->savedAt;
+        for (const SavedComp& comp : saved_)
+            if (comp.takesKey == key)
+                first = std::min(first, comp.savedAt);
+        hint = "Recorded " + formatTime(first);
+    }
+    ImGui::BeginDisabled(current == nullptr);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 11.0f);
+    ImGui::InputTextWithHint("##recordingName", hint.c_str(), currentRecordingBuffer_.data(),
+                             currentRecordingBuffer_.size());
+    recordingFieldActive_ = ImGui::IsItemActive();
+    if (ImGui::IsItemDeactivatedAfterEdit() && store_ != nullptr && !currentRecordingKey_.empty()) {
+        store_->setRecordingName(currentRecordingKey_, currentRecordingBuffer_.data());
+        recordingNames_[currentRecordingKey_] = currentRecordingBuffer_.data();
+    }
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("Name of the recordings being comped (the takes). Saved comps list "
+                          "the comps cut from them under this name.");
+    ImGui::SameLine();
+    ImGui::TextDisabled(">");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 11.0f);
+    ImGui::InputTextWithHint("##compName", "Comp name", nameBuffer_.data(), nameBuffer_.size());
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        compName_ = nameBuffer_.data();
+        saveNow(client);
+    }
+    ImGui::SetItemTooltip("Name of this comp in the list of saved comps");
+}
+
+const SavedComp* CompView::currentSave() const {
+    if (sessionId_.empty())
+        return nullptr;
+    const auto it = std::ranges::find(saved_, sessionId_, &SavedComp::session);
+    return it == saved_.end() ? nullptr : &*it;
+}
+
+void CompView::drawCurrentMark(const ImVec2 rowStart, const float rowHeight) const {
+    // A bar in the accent color along the left edge of a list row.
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    const ImVec2 screen(ImGui::GetWindowPos().x + rowStart.x - ImGui::GetScrollX(),
+                        ImGui::GetWindowPos().y + rowStart.y - ImGui::GetScrollY());
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        screen, ImVec2(screen.x + 3.0f * scale, screen.y + rowHeight), palette_.accent);
+}
+
 std::string CompView::recordingTitle(const RecordingSet& set) const {
     const auto it = recordingNames_.find(set.takesKey);
     if (it != recordingNames_.end() && !it->second.empty())
@@ -1880,13 +1947,17 @@ void CompView::refreshSavedChoices(const State& state) {
     const auto& session = *state.session;
     const auto best =
         store_->offerFor(state.project, session.label, session.fingerprint, sessionId_);
+    // The comp being worked on is listed too, marked as current.
+    const SavedComp* current = currentSave();
     std::vector<SavedComp> candidates;
     for (const auto& comp : store_->list()) {
-        if (comp.project != state.project || comp.session == sessionId_)
+        if (comp.project != state.project)
             continue;
         const bool related = comp.clip == session.label ||
                              (!comp.fingerprint.empty() && comp.fingerprint == session.fingerprint);
-        if (showAllClips_ || related || (best && comp.takesKey == best->takesKey))
+        if (showAllClips_ || related || comp.session == sessionId_ ||
+            (best && comp.takesKey == best->takesKey) ||
+            (current != nullptr && comp.takesKey == current->takesKey))
             candidates.push_back(comp);
     }
     recordingSets_ = groupByRecordings(candidates);
@@ -1895,13 +1966,15 @@ void CompView::refreshSavedChoices(const State& state) {
         recordingNames_[set.takesKey] = store_->recordingName(set.takesKey);
     savedSet_ = 0;
     savedChoice_ = 0;
-    // Select the best guess, and move its set to the top.
-    if (best) {
-        const auto set = std::ranges::find(recordingSets_, best->takesKey, &RecordingSet::takesKey);
+    // Select the current comp, else the best guess, and move its set to the top.
+    const SavedComp* select = current != nullptr ? current : best ? &*best : nullptr;
+    if (select != nullptr) {
+        const auto set =
+            std::ranges::find(recordingSets_, select->takesKey, &RecordingSet::takesKey);
         if (set != recordingSets_.end()) {
             std::rotate(recordingSets_.begin(), set, set + 1);
             const auto& comps = recordingSets_.front().comps;
-            const auto it = std::ranges::find(comps, best->cutsKey, &SavedComp::cutsKey);
+            const auto it = std::ranges::find(comps, select->cutsKey, &SavedComp::cutsKey);
             savedChoice_ = it == comps.end() ? 0 : static_cast<int>(it - comps.begin());
         }
     }

@@ -110,16 +110,18 @@ says which track to click. Launcher clips are pinned by the session and have no 
 ![Waiting for a click in Bitwig after recording](docs/screenshots/select.png)
 
 **Saved comps.** The companion saves the current comp shortly after every change, one file per
-session, keeping the ten newest unnamed saves per clip and every named one. Give a comp a name
-in the *Comp name* field to find it again. When you comp a clip with a saved comp in the same
+session, keeping the ten newest unnamed saves per clip and every named one. The toolbar shows
+what you are working on as two fields, the recordings (the takes) and the comp cut from them;
+name them there to find them again. When you comp a clip with a saved comp in the same
 project, a banner offers *Restore*, and the start screen notes it. *Saved comps...* (or
 *Choose...* in the banner) separates recordings from comps: on the left the recording sets
 (saved comps with the same takes, titled by when they were first saved), on the right the comps
 cut from the selected set, each distinct cut once, with the takes it uses and its number of
 cuts. Both can be renamed in the fields below the lists, and comps deleted (recording names are
 kept in `recordings.json`). It lists the comps of this clip (by title, or by the notes it holds,
-for a copy or a renamed clip); *All clips of this project* shows the rest. The best guess is
-selected. *Restore comp* brings back takes and cuts, *Restore takes only* the takes with a new
+for a copy or a renamed clip); *All clips of this project* shows the rest. The recordings and
+the comp being worked on are marked *current* (with a bar in the accent color) and selected;
+otherwise the best guess is selected. *Restore comp* brings back takes and cuts, *Restore takes only* the takes with a new
 comp that uses the first take throughout. Files live in
 `~/.local/share/midicomp/comps` (Linux, or `$XDG_DATA_HOME`), `~/Library/Application
 Support/midicomp/comps` (macOS) or `%APPDATA%\midicomp\comps` (Windows); `--store-dir`
