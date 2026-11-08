@@ -223,16 +223,25 @@ def copy_label(client_name: str) -> str:
     return f"VirMIDI {m[1]}-{m[2]}" if m else client_name
 
 
+def bitwig_name(index: int) -> str:
+    """Returns how Bitwig lists the ``index``-th virtual device (from 0): it numbers devices
+    with the same name in order, the first without a number, and adds the subdevice ("/1")."""
+    return "Virtual Raw MIDI" + (f" {index + 1}" if index > 0 else "") + "/1"
+
+
 def describe(clients: list[Client]) -> list[str]:
-    """Returns one line per virtual port with the device port connected to it."""
+    """Returns one line per virtual port with the device port connected to it and the name
+    Bitwig shows for it."""
     names = {(c.number, p.number): f"{c.name}:{p.name}" for c in clients for p in c.ports}
     lines = []
-    for c in sorted((c for c in clients if VIRTUAL.match(c.name) and c.ports),
-                    key=lambda c: copy_sort_key(c.name)):
+    copies = sorted((c for c in clients if VIRTUAL.match(c.name) and c.ports),
+                    key=lambda c: copy_sort_key(c.name))
+    for index, c in enumerate(copies):
         port = c.ports[0]
         senders = sorted(names.get(a, f"{a[0]}:{a[1]}") for a in port.receives_from)
         feedback = " (and back)" if port.sends_to & port.receives_from else ""
-        lines.append(f"{copy_label(c.name):<16} <- {', '.join(senders) or '(free)'}{feedback}")
+        lines.append(f"{copy_label(c.name):<14} {'(Bitwig: ' + bitwig_name(index) + ')':<30} "
+                     f"<- {', '.join(senders) or '(free)'}{feedback}")
     return lines
 
 

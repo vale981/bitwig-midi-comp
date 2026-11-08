@@ -235,14 +235,17 @@ arrives at a copy goes out on its raw device, which Bitwig has open.
 
 The copies cannot be renamed: the kernel names them after their card and device number. A
 fixed card number keeps the names the same, and `midi-copies list` shows which copy belongs to
-which device. With a keyboard that has two ports, of which only the first accepts input:
+which device and how Bitwig lists it. Bitwig numbers the devices in order ("Virtual Raw MIDI",
+"Virtual Raw MIDI 2", ...) and lists each with sixteen subdevices ("/1" to "/16"), which all
+carry the same data; use "/1". With a keyboard that has two ports, of which only the first
+accepts input:
 
 ```
 $ midi-copies list
-VirMIDI 16-0     <- USB Axiom 61:USB Axiom 61 MIDI 1 (and back)
-VirMIDI 16-1     <- USB Axiom 61:USB Axiom 61 MIDI 2
-VirMIDI 16-2     <- (free)
-VirMIDI 16-3     <- (free)
+VirMIDI 16-0   (Bitwig: Virtual Raw MIDI/1)   <- USB Axiom 61:USB Axiom 61 MIDI 1 (and back)
+VirMIDI 16-1   (Bitwig: Virtual Raw MIDI 2/1) <- USB Axiom 61:USB Axiom 61 MIDI 2
+VirMIDI 16-2   (Bitwig: Virtual Raw MIDI 3/1) <- MIDI Comp:Preview
+VirMIDI 16-3   (Bitwig: Virtual Raw MIDI 4/1) <- (free)
 ```
 
 **NixOS.** The flake provides a module:

@@ -91,8 +91,10 @@ Client 129 : "MIDI Comp" [User Legacy]
 
     def test_describe(self):
         lines = describe(parse_clients(PROC))
-        self.assertEqual(lines[0].split(), ["VirMIDI", "16-0", "<-", "USB", "Axiom", "61:USB",
-                                            "Axiom", "61", "MIDI", "1"])
+        self.assertEqual(lines[0].split(), ["VirMIDI", "16-0", "(Bitwig:", "Virtual", "Raw",
+                                            "MIDI/1)", "<-", "USB", "Axiom", "61:USB", "Axiom",
+                                            "61", "MIDI", "1"])
+        self.assertIn("(Bitwig: Virtual Raw MIDI 2/1)", lines[1])
         self.assertTrue(lines[1].endswith("(free)"))
 
 
