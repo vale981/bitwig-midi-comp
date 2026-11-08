@@ -2,10 +2,25 @@ Comping for MIDI clips in Bitwig Studio: record loop passes, then cut them toget
 companion app while the clip updates live. See the [README](https://github.com/vale981/bitwig-midi-comp#readme)
 for the workflow.
 
-**This is an alpha.** It has been used on Linux with arranger clips; launcher clips, macOS and
-Windows are built by CI but barely tested. Saved comps live in the companion's data directory,
+**This is an alpha.** It has been used on Linux with arranger clips and, since this release,
+the clip launcher; macOS and Windows are built by CI but barely tested. Saved comps live in the companion's data directory,
 so a broken session can be restored from there. Please report problems with the extension log
 (*Log* in the companion).
+
+### New in this alpha
+
+- **Pedals and controllers:** CC (hi-hat pedal, sustain, mod wheel), channel pressure and pitch
+  bend are recorded with every take, follow the cuts and show as curves in the lanes. *Load
+  into Bitwig* brings them into Bitwig as a MIDI file.
+- **Comping in the clip launcher:** *Play in launcher* plays the comped loop from the launcher in
+  sync with the arrangement and reloads it with its controllers after each edit; *Back to
+  arranger* brings the edits back.
+- **Transport from the companion:** a playhead, play and stop (`Space`), and moving the playhead
+  by clicking the ruler or with the arrow keys.
+- **Takes:** rename them by double-clicking; fast repeated hits on one key (closed hi-hats) are
+  kept.
+- **Linux:** `midi_copies.py` and its NixOS module give every MIDI device its own virtual copy,
+  so Bitwig and the companion can use a keyboard at the same time.
 
 ### Files
 

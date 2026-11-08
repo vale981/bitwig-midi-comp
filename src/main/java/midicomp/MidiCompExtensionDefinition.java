@@ -33,7 +33,7 @@ public class MidiCompExtensionDefinition extends ControllerExtensionDefinition
    @Override
    public String getVersion()
    {
-      return "0.1.0-alpha.1";
+      return "0.1.0-alpha.2";
    }
 
    @Override
