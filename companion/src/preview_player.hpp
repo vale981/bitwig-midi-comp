@@ -132,6 +132,9 @@ class PreviewPlayer {
     /** Returns how timing is derived right now: "MIDI clock", "transport" or "". */
     [[nodiscard]] std::string timingSource() const;
 
+    /** Returns the number of MIDI messages sent so far. */
+    [[nodiscard]] long long sent() const { return sent_.load(); }
+
   private:
     void run();
     void openClockInput();
@@ -158,6 +161,7 @@ class PreviewPlayer {
     std::atomic<bool> enabled_{false};
     std::atomic<std::int64_t> leadMicros_{10'000};
     std::atomic<bool> stopping_{false};
+    std::atomic<long long> sent_{0};
     std::thread thread_;
 };
 

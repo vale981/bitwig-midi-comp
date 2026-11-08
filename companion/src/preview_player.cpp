@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
-#include <regex>
 #include <sstream>
 
 #if __has_include(<rtmidi/RtMidi.h>)
@@ -25,26 +24,41 @@ constexpr std::int64_t kClockTimeoutMicros = 250'000;
 
 /**
  * Returns the name of the VirMIDI copy the preview port is connected to (Linux), as RtMidi lists
- * it, so Bitwig's MIDI clock sent to that device can be read back.
+ * it, so Bitwig's MIDI clock sent to that device can be read back. Parses
+ * ``/proc/asound/seq/clients`` line by line.
  */
 std::optional<std::string> clockPortName() {
     std::ifstream in("/proc/asound/seq/clients");
     if (!in)
         return std::nullopt;
-    std::stringstream buffer;
-    buffer << in.rdbuf();
-    const std::string text = buffer.str();
-    // Our client "MIDI Comp" with its port "Preview", then "Connecting To: <client>:<port>".
-    const std::regex preview(
-        R"re(Client\s+\d+\s*:\s*"MIDI Comp"[^\n]*\n(?:\s+[^\n]*\n)*?\s+Port\s+\d+\s*:\s*"Preview"[^\n]*\n\s+Connecting To:\s*(\d+):)re");
-    std::smatch m;
-    if (!std::regex_search(text, m, preview))
+    std::map<int, std::string> clientNames;
+    std::optional<int> target;
+    std::string client;
+    bool inPreview = false;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.starts_with("Client")) {
+            // Client  82 : "Virtual Raw MIDI 16-2" [Kernel Legacy]
+            const auto colon = line.find(':');
+            const auto open = line.find('"');
+            const auto close = line.find('"', open + 1);
+            if (colon == std::string::npos || open == std::string::npos ||
+                close == std::string::npos)
+                continue;
+            client = line.substr(open + 1, close - open - 1);
+            clientNames[std::atoi(line.substr(6, colon - 6).c_str())] = client;
+            inPreview = false;
+        } else if (line.find("  Port ") == 0) {
+            inPreview = client == "MIDI Comp" && line.find("\"Preview\"") != std::string::npos;
+        } else if (inPreview && !target) {
+            const auto at = line.find("Connecting To:");
+            if (at != std::string::npos)
+                target = std::atoi(line.c_str() + at + 14);
+        }
+    }
+    if (!target || !clientNames.contains(*target))
         return std::nullopt;
-    const std::regex client("Client\\s+" + m[1].str() + "\\s*:\\s*\"([^\"]+)\"");
-    std::smatch c;
-    if (!std::regex_search(text, c, client))
-        return std::nullopt;
-    return c[1].str();
+    return clientNames[*target];
 }
 
 }  // namespace
@@ -297,6 +311,7 @@ void PreviewPlayer::send(const PreviewEvent& e) {
     } catch (const RtMidiError&) {
         return;
     }
+    ++sent_;
     const int type = e.bytes[0] & 0xF0;
     const int note = (e.bytes[0] & 0x0F) << 8 | e.bytes[1];
     if (type == 0x90)
