@@ -210,6 +210,13 @@ public class MidiCompExtension extends ControllerExtension
    private LauncherOrigin launcherOrigin;
    /** After Back to arranger: load the merged comp into a launcher slot from this time on. */
    private long loadAfterBackAt;
+   /** Step of the experimental clipboard paste (:meth:`tickPaste`), or -1. */
+   private int pasteStep = -1;
+   private long pasteAt;
+   private ClipLauncherSlot pasteSlot;
+   private int pasteSlotIndex;
+   private double pasteBeat;
+   private boolean focusActionsLogged;
    private long syncedRevision;
    /** The launcher session :meth:`tickAutoReload` follows; a new one resets its baseline. */
    private ClipRef reloadLink;
@@ -415,6 +422,7 @@ public class MidiCompExtension extends ControllerExtension
       {
          track.clipLauncherSlotBank().getItemAt(i).hasContent().markInterested();
          track.clipLauncherSlotBank().getItemAt(i).name().markInterested();
+         track.clipLauncherSlotBank().getItemAt(i).isSelected().markInterested();
       }
    }
 
@@ -534,6 +542,7 @@ public class MidiCompExtension extends ControllerExtension
       tickLoad();
       tickLauncherPlay();
       tickAutoReload();
+      tickPaste();
       if (loadAfterBackAt != 0 && System.nanoTime() > loadAfterBackAt && pendingStart == null
          && carryAfterStart == null)
       {
@@ -619,6 +628,7 @@ public class MidiCompExtension extends ControllerExtension
          case "loadIntoBitwig" -> loadIntoBitwig();
          case "playInLauncher" -> playInLauncher();
          case "backToArranger" -> backToArranger();
+         case "pasteIntoArranger" -> pasteIntoArranger();
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -2038,6 +2048,128 @@ public class MidiCompExtension extends ControllerExtension
          it.remove();
       }
       return cleared;
+   }
+
+   /**
+    * Experimental: pastes the clip MIDI Comp last loaded into a launcher slot of the comp track
+    * over the arranger comp clip, through Bitwig's clipboard (see :meth:`tickPaste`).
+    */
+   private Result pasteIntoArranger()
+   {
+      if (live.link() == null || live.link().source() != Take.Source.ARRANGER)
+         return Result.fail("Paste into arranger works in arranger sessions");
+      final double clipStart = arrangerClipStart();
+      if (Double.isNaN(clipStart))
+         return Result.fail("Play the clip once, so MIDI Comp knows where to paste");
+      final Track track = loadBank.getItemAt(0);
+      if (track.position().get() != live.link().trackPosition())
+      {
+         loadBank.scrollPosition().set(live.link().trackPosition());
+         return Result.fail("Finding the comp track; try again in a moment");
+      }
+      final int scene = ownSlot(track, live.link().trackPosition());
+      if (scene < 0)
+         return Result.fail("Load the comp with Load into Bitwig first");
+      pasteSlot = track.clipLauncherSlotBank().getItemAt(scene);
+      pasteSlotIndex = scene + 1;
+      pasteBeat = clipStart;
+      pasteStep = 0;
+      pasteAt = System.nanoTime();
+      return Result.ok("Pasting into the arranger (experimental); see the log");
+   }
+
+   /**
+    * Experimental: copies the comp clip loaded into a launcher slot and pastes it over the
+    * arranger comp clip, through Bitwig's clipboard. Copy and paste act on the focused panel and
+    * the selection, so each step focuses and selects first, and every step is logged.
+    */
+   private void tickPaste()
+   {
+      if (pasteStep < 0 || System.nanoTime() < pasteAt)
+         return;
+      switch (pasteStep)
+      {
+         case 0 ->
+         {
+            // Focus first: switching panels afterwards could change what is selected.
+            logFocusActions();
+            application.setPanelLayout(com.bitwig.extension.controller.api.Application.PANEL_LAYOUT_ARRANGE);
+            final String focus = invokeFocusAction("launcher");
+            log("Clipboard 1/4: "
+               + (focus == null ? "no focus action for the launcher found" : "focused with " + focus));
+         }
+         case 1 ->
+         {
+            pasteSlot.select();
+            log("Clipboard 2/4: selected the loaded clip in slot " + pasteSlotIndex);
+         }
+         case 2 ->
+         {
+            application.copy();
+            log("Clipboard 3/4: copied (the loaded clip " + (pasteSlot.isSelected().get() ? "was"
+               : "was NOT") + " selected)");
+         }
+         case 3 ->
+         {
+            transport.playStartPosition().set(pasteBeat);
+            loadBank.getItemAt(0).selectInEditor();
+            final String focus = invokeFocusAction("arrang");
+            log(String.format("Clipboard 4/4: play start at beat %.3f, comp track selected%s",
+               pasteBeat, focus == null ? "; no focus action for the arranger found"
+                  : ", focused with " + focus));
+         }
+         default ->
+         {
+            application.paste();
+            log("Pasted. Check the arranger: undo (Ctrl+Z) in Bitwig if it landed elsewhere; "
+               + "the clip in launcher slot " + pasteSlotIndex + " is kept either way");
+            lastMessage = "Pasted the comp into the arranger (experimental); check it in Bitwig";
+            markDirty();
+            pasteStep = -1;
+            return;
+         }
+      }
+      pasteStep++;
+      pasteAt = System.nanoTime() + 400_000_000L;
+   }
+
+   /**
+    * Invokes a focus action whose identifier mentions ``panel`` and returns its id. Actions that
+    * also toggle (and could hide a focused panel) are only used without a plain focus action.
+    */
+   private String invokeFocusAction(final String panel)
+   {
+      com.bitwig.extension.controller.api.Action fallback = null;
+      for (final com.bitwig.extension.controller.api.Action action : application.getActions())
+      {
+         final String id = action.getId().toLowerCase(java.util.Locale.ROOT);
+         if (!id.contains("focus") || !id.contains(panel))
+            continue;
+         if (!id.contains("toggle"))
+         {
+            action.invoke();
+            return action.getId();
+         }
+         if (fallback == null)
+            fallback = action;
+      }
+      if (fallback == null)
+         return null;
+      fallback.invoke();
+      return fallback.getId();
+   }
+
+   /** Logs Bitwig's focus actions once, to adjust :meth:`invokeFocusAction` if needed. */
+   private void logFocusActions()
+   {
+      if (focusActionsLogged)
+         return;
+      focusActionsLogged = true;
+      final List<String> ids = new ArrayList<>();
+      for (final com.bitwig.extension.controller.api.Action action : application.getActions())
+         if (action.getId().toLowerCase(java.util.Locale.ROOT).contains("focus"))
+            ids.add(action.getId());
+      log("Focus actions: " + String.join(", ", ids));
    }
 
    /**
