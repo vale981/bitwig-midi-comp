@@ -238,12 +238,15 @@ void MidiInput::receive(const double delta, const std::vector<unsigned char>& me
         // Every message advances the driver clock, notes or not.
         const double elapsed = anchor_.add(delta, arrival);
         const auto type = message.empty() ? 0 : message[0] & 0xF0;
-        if (message.size() >= 3 && (type == 0x80 || type == 0x90)) {
+        // Notes, and the control messages takes keep: CC (the hi-hat pedal is CC 4), channel
+        // pressure (two bytes) and pitch bend.
+        const bool threeBytes = type == 0x80 || type == 0x90 || type == 0xB0 || type == 0xE0;
+        if ((threeBytes && message.size() >= 3) || (type == 0xD0 && message.size() >= 2)) {
             pending_.push_back(Pending{.elapsed = elapsed,
                                        .status = message[0],
                                        .data1 = message[1],
-                                       .data2 = message[2]});
-            note = true;
+                                       .data2 = threeBytes ? message[2] : std::uint8_t{0}});
+            note = type == 0x80 || type == 0x90;
         }
     }
     if (note) {

@@ -23,6 +23,7 @@ struct Take {
     std::string name;
     std::string source;  ///< ``"launcher"`` or ``"arranger"``.
     int length = 0;      ///< Length in steps.
+    int controls = 0;    ///< Number of control messages (CC, pressure, pitch bend).
     std::vector<Note> notes;
 };
 

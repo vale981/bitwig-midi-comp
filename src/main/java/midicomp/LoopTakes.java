@@ -47,9 +47,13 @@ final class LoopTakes
     *    meanDeviationBeats: mean distance between matched recorded and played positions after
     *       removing the offset.
     *    maxDeviationBeats: the largest such distance.
+    *    passNumbers: the pass number of each entry in ``passes``.
+    *    loopStartInClip: clip-local beat of the loop start; ``offsetBeats`` minus it is the
+    *       delay of the played timing.
     */
    record Result(List<List<NoteData>> passes, int matched, int rebuilt, int unmatched,
-      int dropped, double offsetBeats, double meanDeviationBeats, double maxDeviationBeats)
+      int dropped, double offsetBeats, double meanDeviationBeats, double maxDeviationBeats,
+      List<Integer> passNumbers, double loopStartInClip)
    {
    }
 
@@ -134,7 +138,7 @@ final class LoopTakes
    {
       if (played.isEmpty() || loopBeats <= 0)
          return new Result(recorded.isEmpty() ? List.of() : List.of(List.copyOf(recorded)), 0, 0,
-            recorded.size(), 0, 0, 0, 0);
+            recorded.size(), 0, 0, 0, 0, recorded.isEmpty() ? List.of() : List.of(0), 0);
 
       int lastPass = 0;
       for (final KeyboardEvents.PlayedNote p : played)
@@ -231,7 +235,49 @@ final class LoopTakes
 
       return new Result(new ArrayList<>(byPass.values()), matched, rebuilt, unmatched, dropped,
          offset,
-         matched == 0 ? 0 : deviationSum / matched, deviationMax);
+         matched == 0 ? 0 : deviationSum / matched, deviationMax,
+         new ArrayList<>(byPass.keySet()), loopStartInClip);
+   }
+
+   /**
+    * Places control messages in the takes of an assembled recording, with the same delay
+    * correction as the notes.
+    *
+    * Args:
+    *    controls: messages from :meth:`KeyboardEvents.controls`.
+    *    result: the assembled recording.
+    *    stepSize: grid step length in beats.
+    *    loopBeats: loop length in beats.
+    *
+    * Returns:
+    *    For each pass in ``result.passes()``, its messages in grid coordinates.
+    */
+   static List<List<ControlEvent>> placeControls(
+      final List<KeyboardEvents.PlayedControl> controls,
+      final Result result,
+      final double stepSize,
+      final double loopBeats)
+   {
+      final double delay = result.offsetBeats() - result.loopStartInClip();
+      final Map<Integer, List<ControlEvent>> byPass = new HashMap<>();
+      for (final KeyboardEvents.PlayedControl c : controls)
+      {
+         double beat = c.loopBeat() + delay;
+         int pass = c.pass();
+         // The pre-roll state belongs at the start of the first pass, not before it.
+         if (beat < 0 && pass == 0)
+            beat = 0;
+         final int shift = (int) Math.floor(beat / loopBeats);
+         beat -= shift * loopBeats;
+         pass += shift;
+         final int x = Math.max(0, (int) Math.round((beat + result.loopStartInClip()) / stepSize));
+         byPass.computeIfAbsent(pass, k -> new ArrayList<>())
+            .add(new ControlEvent(x, c.status(), c.data1(), c.data2()));
+      }
+      final List<List<ControlEvent>> placed = new ArrayList<>();
+      for (final int pass : result.passNumbers())
+         placed.add(byPass.getOrDefault(pass, List.of()));
+      return placed;
    }
 
    /**

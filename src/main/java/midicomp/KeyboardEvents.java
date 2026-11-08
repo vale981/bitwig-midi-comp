@@ -37,6 +37,20 @@ final class KeyboardEvents
    {
    }
 
+   /**
+    * A control message played during a recording.
+    *
+    * Args:
+    *    status: status byte with the channel (CC, channel pressure or pitch bend).
+    *    data1: first data byte.
+    *    data2: second data byte.
+    *    pass: loop pass it was played in.
+    *    loopBeat: position within the loop in beats.
+    */
+   record PlayedControl(int status, int data1, int data2, int pass, double loopBeat)
+   {
+   }
+
    private record Message(long time, int status, int data1, int data2)
    {
    }
@@ -110,6 +124,58 @@ final class KeyboardEvents
     * Returns:
     *    The notes in the order they were played; notes before the loop start are left out.
     */
+   /**
+    * Places the control messages of a recording in the loop. Each controller's last value before
+    * the recording (the hi-hat pedal held closed, say) is included at the start of the first pass.
+    *
+    * Args:
+    *    from: recording start (nanoseconds).
+    *    to: recording end (nanoseconds).
+    *    timeline: the transport position during the recording.
+    *    loopStart: loop start in beats.
+    *    loopLength: loop length in beats.
+    *    tempo: tempo in beats per minute.
+    *
+    * Returns:
+    *    The messages in the order they were played.
+    */
+   List<PlayedControl> controls(final long from, final long to, final TransportTimeline timeline,
+      final double loopStart, final double loopLength, final double tempo)
+   {
+      final long offset = clockOffset();
+      final List<Message> sorted = new ArrayList<>();
+      for (final Message m : messages)
+         if (ControlEvent.isControl(m.status()))
+            sorted.add(new Message(m.time() + offset, m.status(), m.data1(), m.data2()));
+      sorted.sort((a, b) -> Long.compare(a.time(), b.time()));
+
+      final Map<Integer, Message> before = new java.util.LinkedHashMap<>();
+      final List<PlayedControl> controls = new ArrayList<>();
+      for (final Message m : sorted)
+      {
+         if (m.time() > to)
+            break;
+         if (m.time() < from)
+         {
+            before.put(new ControlEvent(0, m.status(), m.data1(), m.data2()).controller(), m);
+            continue;
+         }
+         final TransportTimeline.Placement at = timeline.place(m.time(), loopStart, loopLength,
+            tempo);
+         if (at == null)
+            continue;
+         // Played before the loop start (pre-roll): the state at the start of the first pass.
+         final boolean early = at.loopBeat() < 0;
+         controls.add(new PlayedControl(m.status(), m.data1(), m.data2(), early ? 0 : at.pass(),
+            early ? 0 : at.loopBeat()));
+      }
+      final List<PlayedControl> result = new ArrayList<>();
+      for (final Message m : before.values())
+         result.add(new PlayedControl(m.status(), m.data1(), m.data2(), 0, 0));
+      result.addAll(controls);
+      return result;
+   }
+
    List<PlayedNote> notes(final long from, final long to, final TransportTimeline timeline,
       final double loopStart, final double loopLength, final double tempo)
    {

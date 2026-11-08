@@ -88,7 +88,7 @@ State document:
   },
   "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [
-    {"id": 1, "name": "Pass 1", "source": "arranger", "length": 2048,
+    {"id": 1, "name": "Pass 1", "source": "arranger", "length": 2048, "controls": 12,
      "notes": [[x, key, durationSteps, velocity, muted, -1], ...]}
   ],
   "segments": [[from, to, takeId], ...],
@@ -112,6 +112,7 @@ Bitwig did not process the command within 5 s.
 | `newVersion` |                             | Launcher sessions: duplicate the session clip into another slot and continue on the copy with the same takes and segments; the original keeps its comp. The session ends at once and starts on the copy when Bitwig selects it, after renaming it with a version suffix. If Bitwig does not select the copy within 4 s, the log says so. Fails for arranger sessions. |
 | `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start. Passes become takes (assembled with the keyboard notes from `played`, see below); the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
 | `stopRecording` |                          | Stop the transport and arranger recording. |
+| `loadIntoBitwig` |                       | Write the comp, notes and control messages, as a MIDI file (`~/.midicomp/midi/<title>.mid`) and load it: into the session clip's slot for launcher clips (the notes are written again afterwards, as MIDI files lack per-note values like timbre), else into the first free launcher slot of the comp track. |
 | `transport`  | `action=play\|stop\|toggle` | Start or stop Bitwig's transport. |
 | `seek`       | `step`                      | Arranger sessions: move the playhead to a step of the session clip (sets the play start, and jumps there while playing). Needs the clip's position in the arrangement, which the extension learns while the clip plays. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
@@ -136,8 +137,8 @@ The body of `played`:
 Times are on the monotonic clock (`CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS,
 `QueryPerformanceCounter` on Windows), which Java's `System.nanoTime()` also uses. The extension
 estimates the offset between the clocks as the smallest difference between its time of arrival
-and `now` over the last minute, so a different clock base still works. Only note-on and note-off
-messages are used; the companion takes the time of each message from the MIDI driver's
+and `now` over the last minute, so a different clock base still works. Note-on and note-off
+messages, control changes, channel pressure and pitch bend are used; the companion takes the time of each message from the MIDI driver's
 timestamps rather than from its arrival. Messages are kept for 15 minutes.
 
 ### Fingerprints
@@ -176,6 +177,7 @@ the step size, so `import` can rescale positions if the timing resolution change
 {"format": 1, "project": "My song", "clip": "Keys (arranger)", "source": "arranger",
  "stepSize": 0.0078125, "fingerprint": "3f2a9c01d4e5b677",
  "takes": [{"name": "Pass 1", "source": "arranger", "length": 2048,
+            "controls": [[x, status, data1, data2], ...],   // CC, pressure, pitch bend
             "notes": [{"ch": 0, "x": 0, "key": 60, "vel": 0.8, "rel": 0.5, "dur": 0.5,
                        "pan": 0, "timbre": 0, "pressure": 0, "gain": 0, "transpose": 0,
                        "chanceOn": false, "chance": 1, "occurrenceOn": false, "occurrence": null,

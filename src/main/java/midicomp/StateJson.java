@@ -152,6 +152,7 @@ final class StateJson
             .append(",\"name\":").append(Json.quote(t.name()))
             .append(",\"source\":").append(Json.quote(t.source().name().toLowerCase()))
             .append(",\"length\":").append(t.length())
+            .append(",\"controls\":").append(t.controls().size())
             .append(",\"notes\":[");
          appendNotes(sb, t.notes(), stepSize);
          sb.append("]}");

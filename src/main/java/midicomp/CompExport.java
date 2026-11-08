@@ -71,6 +71,13 @@ final class CompExport
             .append(",\"notes\":[");
          for (int j = 0; j < t.notes().size(); j++)
             appendNote(sb.append(j > 0 ? "," : ""), t.notes().get(j));
+         sb.append("],\"controls\":[");
+         for (int j = 0; j < t.controls().size(); j++)
+         {
+            final ControlEvent c = t.controls().get(j);
+            sb.append(j > 0 ? "," : "").append('[').append(c.x()).append(',').append(c.status())
+               .append(',').append(c.data1()).append(',').append(c.data2()).append(']');
+         }
          sb.append("]}");
       }
 
@@ -120,9 +127,18 @@ final class CompExport
          final List<NoteData> notes = new ArrayList<>();
          for (final Object n : MiniJson.array(t, "notes"))
             notes.add(readNote((Map<String, Object>) n, scale));
+         final List<ControlEvent> controls = new ArrayList<>();
+         if (t.get("controls") instanceof List<?> list)
+            for (final Object c : list)
+            {
+               final List<Object> v = (List<Object>) c;
+               controls.add(new ControlEvent(scaled((Double) v.get(0), scale),
+                  (int) (double) (Double) v.get(1), (int) (double) (Double) v.get(2),
+                  (int) (double) (Double) v.get(3)));
+            }
          takes.add(new Take(takes.size(), MiniJson.string(t, "name", "Take"),
             source(MiniJson.string(t, "source", "arranger")),
-            scaled(MiniJson.number(t, "length", 0), scale), notes));
+            scaled(MiniJson.number(t, "length", 0), scale), notes, controls));
       }
 
       final List<int[]> segments = new ArrayList<>();

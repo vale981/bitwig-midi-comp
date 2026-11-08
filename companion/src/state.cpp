@@ -122,6 +122,7 @@ State parseState(const std::string_view text) {
             .name = t.at("name").get<std::string>(),
             .source = t.at("source").get<std::string>(),
             .length = t.at("length").get<int>(),
+            .controls = t.value("controls", 0),
             .notes = parseNotes(t.at("notes")),
         });
     }

@@ -65,7 +65,15 @@ Two parts:
    pass is added as a lane. While the comp still uses a single take throughout, it switches to the
    new pass, as with Bitwig's audio takes; once takes are cut together, the comp stays as it is.
 
-4. **Finish.** *Done* ends the session; the clip keeps the comp. *Revert* restores the clip as it
+4. **Finish.** *Done* ends the session; the clip keeps the comp.
+
+   The editor writes notes only; the extension API cannot write CC into clips. Control messages
+   played while recording (CC such as the hi-hat pedal or sustain, channel pressure, pitch bend)
+   are kept with each take, and a comp takes each cut's messages, starting with the take's
+   controller values at the cut. *Load into Bitwig* writes the comp with them as a MIDI file and
+   loads it: launcher comps directly into their slot, arranger comps into a free launcher slot of
+   the comp track, from where you drag them over the arranger clip. The files are kept in
+   `~/.midicomp/midi`. *Revert* restores the clip as it
    was before the session and ends it.
 
 Takes recorded elsewhere (another track or launcher slot) can be added with *Add take*, which
@@ -294,7 +302,9 @@ README images use Rose Pine Dawn and, in the Theme section, the stock colors. `s
   clip 1/512 beat (1 ms). Clips longer than 256 bars cannot be fully accessed.
 - **Copied attributes.** Velocity, release velocity, duration, pan, timbre, pressure, gain,
   transpose, chance, occurrence, recurrence, repeats and mute. Drawn per-note expression curves and
-  clip automation (CC, pitch bend) are not exposed by the API and are not copied.
+  clip automation (CC, pitch bend) are not exposed by the API: the editor cannot read or write
+  them. Control messages played on the keyboard while recording are kept with each take and
+  comped along with the notes; *Load into Bitwig* brings them into the clip (see *Finish*).
 - **Arranger clips** are identified by track; the API exposes no clip position. A clip on the comp
   clip's track must be selected for changes to be written (see Selection). Clips must not be
   trimmed on the left edge, and clip loops must not repeat inside the comp.

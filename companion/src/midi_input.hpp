@@ -16,7 +16,7 @@ class RtMidiIn;
 
 namespace midicomp {
 
-/** A note message from the keyboard. */
+/** A message from the keyboard: a note, or a control message (CC, pressure, pitch bend). */
 struct MidiEvent {
     std::int64_t timeMicros = 0;  ///< On the monotonic clock, see :func:`monotonicMicros`.
     std::uint8_t status = 0;

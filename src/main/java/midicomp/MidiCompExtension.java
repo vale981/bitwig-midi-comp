@@ -1,5 +1,7 @@
 package midicomp;
 
+import com.bitwig.extension.controller.api.ClipLauncherSlot;
+import com.bitwig.extension.controller.api.TrackBank;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -132,6 +134,16 @@ public class MidiCompExtension extends ControllerExtension
     * does not expose clip positions); ``NaN`` until known. Recent estimates, for their median.
     */
    private final ArrayDeque<Double> clipStartEstimates = new ArrayDeque<>();
+   /** Bank for finding a free launcher slot on the comp track, see :meth:`loadIntoBitwig`. */
+   private TrackBank loadBank;
+   private static final int LOAD_SCENES = 64;
+   /** A MIDI file waiting for :member:`loadBank` to reach the comp track. */
+   private String pendingLoad;
+   private long pendingLoadAt;
+   /** Control messages for the passes being added by :meth:`addPass`, in order. */
+   private final ArrayDeque<List<ControlEvent>> passControls = new ArrayDeque<>();
+   /** After a MIDI file replaced the session clip: rewrite the notes from this time on. */
+   private long rewriteAfterLoadAt;
    /** A comp to import once the next session has started. */
    private String carryAfterStart;
 
@@ -212,6 +224,7 @@ public class MidiCompExtension extends ControllerExtension
 
       initLauncherCursors();
       initArrangerCursor();
+      initLoadBank();
 
       apiStatus = host.getDocumentState().getStringSetting("API", SETTINGS_CATEGORY, 80,
          "not running");
@@ -279,6 +292,17 @@ public class MidiCompExtension extends ControllerExtension
       targetCursor.clipLauncherSlot().sceneIndex().addValueObserver(v -> identityChanged(target));
       targetCursor.clipLauncherSlot().isRecording().addValueObserver(v -> markDirty());
       targetCursor.playingStep().markInterested();
+   }
+
+   /** One track with its launcher slots, scrolled to the comp track for loading comps. */
+   private void initLoadBank()
+   {
+      loadBank = host.createTrackBank(1, 0, LOAD_SCENES);
+      final Track track = loadBank.getItemAt(0);
+      track.position().markInterested();
+      track.name().markInterested();
+      for (int i = 0; i < LOAD_SCENES; i++)
+         track.clipLauncherSlotBank().getItemAt(i).hasContent().markInterested();
    }
 
    private void initArrangerCursor()
@@ -394,6 +418,7 @@ public class MidiCompExtension extends ControllerExtension
       tickSession();
       updatePreview();
       learnClipStart();
+      tickLoad();
       if (server != null)
          server.publishPlayhead(playheadJson());
 
@@ -459,6 +484,7 @@ public class MidiCompExtension extends ControllerExtension
          case "stopRecording" -> stopRecording();
          case "seek" -> seek(intParam(p, "step"));
          case "transport" -> transportAction(p.getOrDefault("action", ""));
+         case "loadIntoBitwig" -> loadIntoBitwig();
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -991,8 +1017,9 @@ public class MidiCompExtension extends ControllerExtension
    private void addPass(final EditableClip clip, final List<NoteData> pass)
    {
       final boolean untouched = model.segments().size() <= 1;
+      final List<ControlEvent> controls = passControls.isEmpty() ? List.of() : passControls.poll();
       final Take take = model.addTake("Pass " + capture.passes(), live.link().source(),
-         lengthInSteps(clip, clip.notes().all()), pass);
+         lengthInSteps(clip, clip.notes().all()), pass, controls);
       if (untouched)
          model.assign(0, model.length(), take.id());
       live.markDirty();
@@ -1176,6 +1203,15 @@ public class MidiCompExtension extends ControllerExtension
          timeline.sampleCount(), keyboard.clockOffset() / 1e6));
       if (result.matched() > 0)
          previewOffsetBeats = result.offsetBeats();
+      final List<List<ControlEvent>> controls = LoopTakes.placeControls(
+         keyboard.controls(recordingSince, until + RECORDING_MARGIN_NANOS, timeline, loopStart,
+            loopBeats, tempo), result, stepSize, loopBeats);
+      passControls.clear();
+      passControls.addAll(controls);
+      final int controlCount = controls.stream().mapToInt(List::size).sum();
+      if (controlCount > 0)
+         log(String.format("%d control messages (CC, pressure, pitch bend) placed in the takes",
+            controlCount));
       endPreview();
       return result.passes();
    }
@@ -1273,6 +1309,101 @@ public class MidiCompExtension extends ControllerExtension
          }
       }
       return Result.ok(action.equals("stop") ? "Stopped" : "Playing");
+   }
+
+   /**
+    * Writes the comp, notes and control messages, as a MIDI file and loads it into Bitwig: into
+    * the session clip's slot for launcher clips, else into the first free launcher slot of the
+    * comp track, to be dragged into the arranger. The extension API cannot write control
+    * messages into clips, but Bitwig imports them from MIDI files.
+    */
+   private Result loadIntoBitwig()
+   {
+      if (live.link() == null)
+         return Result.fail("Start comping a clip first");
+      if (isRecording())
+         return Result.fail("Stop recording first");
+      final boolean launcher = live.link().source() == Take.Source.LAUNCHER;
+      final String title = launcher ? targetCursor.clipLauncherSlot().name().get()
+         : live.link().trackName() + " comp";
+      final java.nio.file.Path file;
+      try
+      {
+         file = writeMidiFile(title.isBlank() ? "Comp" : title);
+      }
+      catch (final java.io.IOException e)
+      {
+         return Result.fail("Could not write the MIDI file: " + e.getMessage());
+      }
+      if (launcher)
+      {
+         targetCursor.clipLauncherSlot().replaceInsertionPoint().insertFile(file.toString());
+         // MIDI files cannot hold timbre, chance and other note values: rewrite the notes once
+         // the file is in.
+         rewriteAfterLoadAt = System.nanoTime() + 1_500_000_000L;
+         log("Loaded " + file + " into " + live.link().label());
+         return Result.ok("Loaded the comp into " + live.link().label());
+      }
+      loadBank.scrollPosition().set(live.link().trackPosition());
+      pendingLoad = file.toString();
+      pendingLoadAt = System.nanoTime();
+      return Result.ok("Loading the comp into a launcher slot of " + live.link().trackName());
+   }
+
+   /** Writes the comp to ``~/.midicomp/midi/<title>.mid`` and returns the path. */
+   private java.nio.file.Path writeMidiFile(final String title) throws java.io.IOException
+   {
+      final java.nio.file.Path dir =
+         java.nio.file.Path.of(System.getProperty("user.home"), ".midicomp", "midi");
+      java.nio.file.Files.createDirectories(dir);
+      final String safe = title.replaceAll("[^A-Za-z0-9 _.-]", "_").strip();
+      final java.nio.file.Path file = dir.resolve((safe.isEmpty() ? "Comp" : safe) + ".mid");
+      final List<NoteData> notes = new ArrayList<>();
+      for (final CompModel.CompNote n : model.render(stepSize))
+         notes.add(n.note());
+      java.nio.file.Files.write(file, MidiFile.write(notes, model.renderControls(), stepSize,
+         transport.tempo().value().getRaw(), model.length()));
+      return file;
+   }
+
+   /** Finishes a load started by :meth:`loadIntoBitwig`: free slot, or the note rewrite. */
+   private void tickLoad()
+   {
+      final long now = System.nanoTime();
+      if (rewriteAfterLoadAt != 0 && now > rewriteAfterLoadAt && live.link() != null
+         && sessionAvailable() && sessionClip().isSettled(LiveSync.SETTLE_MILLIS))
+      {
+         rewriteAfterLoadAt = 0;
+         // Expect an empty clip, so every comp note is written again with all its values.
+         live.link(live.link(), List.of());
+         log("Rewriting the comp's notes over the loaded file");
+      }
+      if (pendingLoad == null || now - pendingLoadAt < 300_000_000L)
+         return;
+      final String file = pendingLoad;
+      pendingLoad = null;
+      final Track track = loadBank.getItemAt(0);
+      if (live.link() == null || track.position().get() != live.link().trackPosition())
+      {
+         lastMessage = "Could not find the comp track; the MIDI file is " + file;
+         markDirty();
+         return;
+      }
+      for (int i = 0; i < LOAD_SCENES; i++)
+      {
+         final ClipLauncherSlot slot = track.clipLauncherSlotBank().getItemAt(i);
+         if (slot.hasContent().get())
+            continue;
+         slot.replaceInsertionPoint().insertFile(file);
+         log("Loaded " + file + " into launcher slot " + (i + 1) + " of " + track.name().get());
+         lastMessage = String.format("Loaded the comp into launcher slot %d of %s; drag it into "
+            + "the arranger", i + 1, track.name().get());
+         markDirty();
+         return;
+      }
+      lastMessage = "No free launcher slot in the first " + LOAD_SCENES + " scenes; the MIDI file "
+         + "is " + file;
+      markDirty();
    }
 
    /**

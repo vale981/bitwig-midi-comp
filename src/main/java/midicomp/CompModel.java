@@ -76,7 +76,33 @@ final class CompModel
       final int length,
       final List<NoteData> notes)
    {
-      final Take take = new Take(nextId++, name, source, length, List.copyOf(notes));
+      return addTake(name, source, length, notes, List.of());
+   }
+
+   /**
+    * Adds a take with control messages.
+    *
+    * Args:
+    *    name: display name.
+    *    source: where the notes came from.
+    *    length: length in grid steps.
+    *    notes: the notes in grid coordinates.
+    *    controls: control messages in grid coordinates.
+    *
+    * Returns:
+    *    The new take.
+    */
+   Take addTake(
+      final String name,
+      final Take.Source source,
+      final int length,
+      final List<NoteData> notes,
+      final List<ControlEvent> controls)
+   {
+      final List<ControlEvent> sorted = new ArrayList<>(controls);
+      sorted.sort(java.util.Comparator.comparingInt(ControlEvent::x));
+      final Take take =
+         new Take(nextId++, name, source, length, List.copyOf(notes), List.copyOf(sorted));
       takes.add(take);
       if (segments.isEmpty())
          assign(0, length, take.id());
@@ -127,7 +153,7 @@ final class CompModel
          final Take t = takes.get(i);
          if (t.id() == id)
          {
-            takes.set(i, new Take(t.id(), name, t.source(), t.length(), t.notes()));
+            takes.set(i, new Take(t.id(), name, t.source(), t.length(), t.notes(), t.controls()));
             return true;
          }
       }
@@ -190,7 +216,8 @@ final class CompModel
       final List<Integer> ids = new ArrayList<>();
       for (final Take t : restored)
       {
-         final Take take = new Take(nextId++, t.name(), t.source(), t.length(), List.copyOf(t.notes()));
+         final Take take = new Take(nextId++, t.name(), t.source(), t.length(),
+            List.copyOf(t.notes()), List.copyOf(t.controls()));
          takes.add(take);
          ids.add(take.id());
       }
@@ -199,6 +226,38 @@ final class CompModel
          if (s[1] > s[0])
             list.add(new Segment(s[0], s[1], ids.get(s[2])));
       this.segments = merged(list);
+   }
+
+   /**
+    * Builds the comp's control messages: each segment contributes its take's messages inside it,
+    * and at its start the take's last value of every controller before it, so that a cut does
+    * not keep the previous take's state (for example the hi-hat opening).
+    *
+    * Returns:
+    *    The messages, by position.
+    */
+   List<ControlEvent> renderControls()
+   {
+      final List<ControlEvent> result = new ArrayList<>();
+      for (final Segment s : segments)
+      {
+         final Take take = take(s.takeId());
+         if (take == null)
+            continue;
+         final java.util.Map<Integer, ControlEvent> before = new java.util.LinkedHashMap<>();
+         final List<ControlEvent> inside = new ArrayList<>();
+         for (final ControlEvent c : take.controls())
+         {
+            if (c.x() < s.from())
+               before.put(c.controller(), c);
+            else if (c.x() < s.to())
+               inside.add(c);
+         }
+         for (final ControlEvent c : before.values())
+            result.add(c.at(s.from()));
+         result.addAll(inside);
+      }
+      return result;
    }
 
    /** Removes all takes and segments. */
