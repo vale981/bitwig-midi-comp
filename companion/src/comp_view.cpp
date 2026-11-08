@@ -71,6 +71,8 @@ void CompView::draw(ApiClient& client) {
     client.setPollPlayhead(comping);
     playhead_ = comping ? client.playhead() : Playhead{};
     playheadStep_ = follower_.position(playhead_, std::chrono::steady_clock::now());
+    if (comping)
+        handleTransportKeys(client, *state);
     handleScaleKeys();
 
     drawToolbar(client, state);
@@ -177,6 +179,8 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
     if (state == nullptr || !state->session) {
     } else {
         const Session& session = *state->session;
+        drawTransportButton(client);
+        ImGui::SameLine();
         // Buttons whose label changes keep one width, so nothing after them moves.
         const float recordWidth =
             ImGui::CalcTextSize("Record").x + 2.0f * ImGui::GetStyle().FramePadding.x;
@@ -863,6 +867,48 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
     }
     ImGui::EndChild();
     drawHints(state);
+}
+
+void CompView::drawTransportButton(ApiClient& client) {
+    // Drawn icons: the UI font has no play or stop symbols.
+    const float h = ImGui::GetFrameHeight();
+    const bool playing = playhead_.transportPlaying;
+    if (ImGui::Button("##transport", ImVec2(h * 1.4f, h)))
+        client.send("transport", {{"action", playing ? "stop" : "play"}});
+    ImGui::SetItemTooltip("%s", playing ? "Stop (Space)" : "Play (Space)");
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+    const float r = h * 0.22f;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (playing)
+        dl->AddRectFilled(ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), palette_.text);
+    else
+        dl->AddTriangleFilled(ImVec2(c.x - r * 0.8f, c.y - r * 1.1f),
+                              ImVec2(c.x - r * 0.8f, c.y + r * 1.1f), ImVec2(c.x + r * 1.1f, c.y),
+                              palette_.text);
+}
+
+void CompView::handleTransportKeys(ApiClient& client, const State& state) {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (io.WantTextInput || io.KeyCtrl || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
+        return;
+    if (ImGui::IsKeyPressed(ImGuiKey_Space, false))
+        client.send("transport", {{"action", "toggle"}});
+    if (!playhead_.canSeek || state.length <= 0)
+        return;
+    // Left and right move by a grid cell (Shift: a beat), Home to the start of the clip.
+    const int grid = io.KeyShift ? state.stepsPerBeat : std::max(1, gridSteps(state));
+    const int here = std::max(0, static_cast<int>(std::lround(playheadStep_)));
+    std::optional<int> target;
+    if (ImGui::IsKeyPressed(ImGuiKey_Home, false))
+        target = 0;
+    else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
+        target = (here / grid + 1) * grid;
+    else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+        target = here % grid != 0 ? here / grid * grid : (here / grid - 1) * grid;
+    if (target)
+        client.send("seek", {{"step", str(std::clamp(*target, 0, state.length))}});
 }
 
 void CompView::handleRulerInput(ApiClient& client, const State& state, const Layout& layout,

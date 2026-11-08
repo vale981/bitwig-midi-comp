@@ -140,6 +140,10 @@ class CompView {
     void drawSessionStatus(const State& state);
     void drawLanes(ApiClient& client, const State& state);
     void drawRuler(ImDrawList* dl, const State& state, const Layout& layout, float y) const;
+    /** Draws the play/stop button. */
+    void drawTransportButton(ApiClient& client);
+    /** Space: play or stop; Left, Right, Home: move the playhead. */
+    void handleTransportKeys(ApiClient& client, const State& state);
     /** Moves the playhead to a clicked ruler position (arranger clips). */
     void handleRulerInput(ApiClient& client, const State& state, const Layout& layout,
                           float height);

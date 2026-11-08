@@ -112,6 +112,7 @@ Bitwig did not process the command within 5 s.
 | `newVersion` |                             | Launcher sessions: duplicate the session clip into another slot and continue on the copy with the same takes and segments; the original keeps its comp. The session ends at once and starts on the copy when Bitwig selects it, after renaming it with a version suffix. If Bitwig does not select the copy within 4 s, the log says so. Fails for arranger sessions. |
 | `record`     | `stopAtEnd=true\|false`     | Arranger sessions, with a clip on the comp track selected: empty the clip, then record from the loop start. Passes become takes (assembled with the keyboard notes from `played`, see below); the comp is written back when recording ends. With `stopAtEnd` (default) recording stops when the loop wraps. |
 | `stopRecording` |                          | Stop the transport and arranger recording. |
+| `transport`  | `action=play\|stop\|toggle` | Start or stop Bitwig's transport. |
 | `seek`       | `step`                      | Arranger sessions: move the playhead to a step of the session clip (sets the play start, and jumps there while playing). Needs the clip's position in the arrangement, which the extension learns while the clip plays. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
 | `addTake`    | `source=launcher\|arranger` | Copy the selected clip's notes as a new take. |
@@ -153,13 +154,15 @@ The playhead in the session clip, kept out of the state because it changes many 
 (clients poll it, the companion about 20 times a second):
 
 ```json
-{"playing": true, "step": 1834, "stepsPerSecond": 512.0, "canSeek": true}
+{"playing": true, "step": 1834, "stepsPerSecond": 512.0, "canSeek": true,
+ "transportPlaying": true}
 ```
 
 `step` is the step being played in the session clip, or `-1` outside it. For arranger clips
 whose position is known (learned while the clip plays: transport position minus playing step),
 it also follows the transport while the clip is not selected, and shows the play start position
-while stopped. `canSeek` says whether `seek` works. While Bitwig records into a hidden arranger clip, it is derived from the
+while stopped. `canSeek` says whether `seek` works; `transportPlaying` whether Bitwig plays at
+all. While Bitwig records into a hidden arranger clip, it is derived from the
 transport position and the loop start in the clip measured at the last recording.
 `stepsPerSecond` lets clients interpolate between polls.
 

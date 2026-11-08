@@ -338,7 +338,12 @@ void testPlayhead() {
     // The follower never steps back for an update that lags slightly, and snaps on jumps.
     using std::chrono::milliseconds;
     PlayheadFollower follower;
-    Playhead p{.playing = true, .step = 1000, .stepsPerSecond = 512.0, .canSeek = true, .at = t0};
+    Playhead p{.playing = true,
+               .step = 1000,
+               .stepsPerSecond = 512.0,
+               .canSeek = true,
+               .transportPlaying = true,
+               .at = t0};
     CHECK(std::abs(follower.position(p, t0) - 1000.0) < 1e-6);
     const double before = follower.position(p, t0 + milliseconds(50));  // 1025.6
     p.step = 1020;  // 50 ms later Bitwig reports a position 10 ms behind

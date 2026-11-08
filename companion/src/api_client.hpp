@@ -35,7 +35,8 @@ struct Playhead {
     bool playing = false;
     int step = -1;  ///< Step being played, or -1 outside the clip.
     double stepsPerSecond = 0.0;
-    bool canSeek = false;  ///< ``seek`` works (arranger clip whose position is known).
+    bool canSeek = false;           ///< ``seek`` works (arranger clip whose position is known).
+    bool transportPlaying = false;  ///< Bitwig plays, inside the clip or not.
     std::chrono::steady_clock::time_point at{};  ///< When it was received.
 
     /**

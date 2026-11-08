@@ -63,6 +63,7 @@ std::optional<Playhead> parsePlayhead(const std::string_view json) {
                         .step = j.value("step", -1),
                         .stepsPerSecond = j.value("stepsPerSecond", 0.0),
                         .canSeek = j.value("canSeek", false),
+                        .transportPlaying = j.value("transportPlaying", false),
                         .at = {}};
     } catch (const nlohmann::json::exception&) {
         return std::nullopt;

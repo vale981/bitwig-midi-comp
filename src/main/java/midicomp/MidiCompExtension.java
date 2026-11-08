@@ -458,6 +458,7 @@ public class MidiCompExtension extends ControllerExtension
          case "record" -> startRecording(!"false".equals(p.get("stopAtEnd")));
          case "stopRecording" -> stopRecording();
          case "seek" -> seek(intParam(p, "step"));
+         case "transport" -> transportAction(p.getOrDefault("action", ""));
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -1248,8 +1249,30 @@ public class MidiCompExtension extends ControllerExtension
       }
       final double stepsPerSecond = transport.tempo().value().getRaw() / 60.0 / stepSize;
       return String.format(java.util.Locale.ROOT,
-         "{\"playing\":%b,\"step\":%d,\"stepsPerSecond\":%.3f,\"canSeek\":%b}",
-         playing && step >= 0, step, stepsPerSecond, !Double.isNaN(arrangerClipStart()));
+         "{\"playing\":%b,\"step\":%d,\"stepsPerSecond\":%.3f,\"canSeek\":%b,"
+            + "\"transportPlaying\":%b}",
+         playing && step >= 0, step, stepsPerSecond, !Double.isNaN(arrangerClipStart()), playing);
+   }
+
+   /**
+    * Starts or stops Bitwig's transport, as its play and stop buttons do.
+    *
+    * Args:
+    *    action: ``play``, ``stop`` or ``toggle``.
+    */
+   private Result transportAction(final String action)
+   {
+      switch (action)
+      {
+         case "play" -> transport.play();
+         case "stop" -> transport.stop();
+         case "toggle" -> transport.togglePlay();
+         default ->
+         {
+            return Result.fail("Unknown transport action: " + action);
+         }
+      }
+      return Result.ok(action.equals("stop") ? "Stopped" : "Playing");
    }
 
    /**

@@ -78,6 +78,11 @@ pointer, `0` or `Delete` clears it, `Ctrl+Z` undoes the last edit, `Ctrl`+wheel 
 `Shift`+wheel scrolls. Take lanes scroll vertically below the fixed comp lane. Double-click a
 take's name to rename it (`Enter` keeps the name, `Escape` cancels).
 
+**Transport keys** (while comping, outside text fields): `Space` plays or stops Bitwig, like
+the play button at the start of the toolbar; for arranger clips, `Left` and `Right` move the
+playhead by one grid cell (`Shift`: one beat) and `Home` moves it to the start of the clip.
+With *Record*, recording can be run entirely from the companion.
+
 **Overwriting.** The comp clip is always overwritten with the comp: edits made to it directly in
 Bitwig are replaced at the next comp change, and recorded passes are replaced once recording
 stops (by then they are takes). Comps are built from the full notes (every attribute the API
