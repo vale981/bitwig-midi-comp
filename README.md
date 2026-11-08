@@ -75,7 +75,9 @@ Two parts:
    loads it: launcher comps directly into their slot, arranger comps into a free launcher slot of
    the comp track, from where you copy them over the arranger clip (copy and paste in Bitwig, or
    drag). The extension cannot take this step itself: copy and paste through the API lose the
-   clip's automation. The files are kept in `~/.midicomp/midi`.
+   clip's automation. The files are kept in `~/.midicomp/midi`. In launcher sessions this
+   happens by itself: about a second after the last edit, the comp is loaded into the clip again
+   with its automation, and a playing clip is relaunched.
 
    *Play in launcher* (arranger comps) plays the comp from the clip launcher while the other
    tracks play the arrangement. It loads the part of the comp inside the arranger loop region
@@ -83,9 +85,8 @@ Two parts:
    automation and loop line up without further settings. It sets a launch quantization of one
    bar, moves the session to that clip (takes and cuts, cropped the same way, come along) and
    launches it in the last bar of the arranger loop, so it comes in at the next loop start and
-   wraps with the arranger. Edits then go to the launcher clip, and about a second after the last
-   edit the comp is loaded into it again as a file, so the automation follows the comp; if the
-   clip was playing, it is relaunched at the next loop start. *Back to arranger* returns the
+   wraps with the arranger. Edits then go to the launcher clip, which is reloaded with its
+   automation after edits as described above; it is relaunched at the next loop start. *Back to arranger* returns the
    track to the arrangement and continues the session in the arranger clip (select it first),
    with the edits made in the launcher merged into the full comp. For its CC automation, copy a
    clip loaded with *Load into Bitwig* over it.
