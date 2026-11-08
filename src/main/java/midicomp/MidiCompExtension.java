@@ -134,6 +134,8 @@ public class MidiCompExtension extends ControllerExtension
     * does not expose clip positions); ``NaN`` until known. Recent estimates, for their median.
     */
    private final ArrayDeque<Double> clipStartEstimates = new ArrayDeque<>();
+   /** Track position the estimates belong to. */
+   private int clipStartTrack = -1;
    private com.bitwig.extension.controller.api.Application application;
    /** Step of the clipboard paste into the arranger (:meth:`tickPaste`), or -1. */
    private int pasteStep = -1;
@@ -311,7 +313,10 @@ public class MidiCompExtension extends ControllerExtension
       track.position().markInterested();
       track.name().markInterested();
       for (int i = 0; i < LOAD_SCENES; i++)
+      {
          track.clipLauncherSlotBank().getItemAt(i).hasContent().markInterested();
+         track.clipLauncherSlotBank().getItemAt(i).isSelected().markInterested();
+      }
    }
 
    private void initArrangerCursor()
@@ -788,7 +793,9 @@ public class MidiCompExtension extends ControllerExtension
          pinTargetToSelection();
       live.link(ref, content);
       sessionFingerprint = Fingerprint.of(content, stepSize);
-      clipStartEstimates.clear();
+      // The learned clip position stays valid for another session on the same track.
+      if (ref.trackPosition() != clipStartTrack)
+         clipStartEstimates.clear();
       capture.start();
       log("Comping " + ref.label() + ": " + selected.describe());
       if (carryAfterStart != null)
@@ -1443,25 +1450,30 @@ public class MidiCompExtension extends ControllerExtension
       {
          case 0 ->
          {
+            // Focus first: switching panels afterwards could change what is selected.
             logFocusActions();
             application.setPanelLayout(com.bitwig.extension.controller.api.Application.PANEL_LAYOUT_ARRANGE);
-            pasteSlot.select();
             final String focus = invokeFocusAction("launcher");
-            log("Clipboard 1/3: selected the loaded clip in slot " + pasteSlotIndex
-               + (focus == null ? "; no focus action for the launcher found" : ", focused with "
-                  + focus));
+            log("Clipboard 1/4: "
+               + (focus == null ? "no focus action for the launcher found" : "focused with " + focus));
          }
          case 1 ->
          {
-            application.copy();
-            log("Clipboard 2/3: copied");
+            pasteSlot.select();
+            log("Clipboard 2/4: selected the loaded clip in slot " + pasteSlotIndex);
          }
          case 2 ->
+         {
+            application.copy();
+            log("Clipboard 3/4: copied (the loaded clip " + (pasteSlot.isSelected().get() ? "was"
+               : "was NOT") + " selected)");
+         }
+         case 3 ->
          {
             transport.playStartPosition().set(pasteBeat);
             loadBank.getItemAt(0).selectInEditor();
             final String focus = invokeFocusAction("arrang");
-            log(String.format("Clipboard 3/3: play start at beat %.3f, comp track selected%s",
+            log(String.format("Clipboard 4/4: play start at beat %.3f, comp track selected%s",
                pasteBeat, focus == null ? "; no focus action for the arranger found"
                   : ", focused with " + focus));
          }
@@ -1526,12 +1538,14 @@ public class MidiCompExtension extends ControllerExtension
    private void learnClipStart()
    {
       if (live.link() == null || live.link().source() != Take.Source.ARRANGER)
-      {
-         clipStartEstimates.clear();
          return;
-      }
       if (!transport.isPlaying().get() || !sessionAvailable())
          return;
+      if (live.link().trackPosition() != clipStartTrack)
+      {
+         clipStartEstimates.clear();
+         clipStartTrack = live.link().trackPosition();
+      }
       final int step = arranger.clip().playingStep().get();
       if (step < 0)
          return;

@@ -43,13 +43,14 @@ class ControlsTest
          false, 1, false, null, false, 1, 1, false, 1, 0, 1, 0, false, false);
       final byte[] file = MidiFile.write(List.of(hat), List.of(pedal(128, 0)), 1.0 / 128, 120, 512);
 
-      assertArrayEquals(new byte[] { 'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0x03,
-         (byte) 0xC0 }, java.util.Arrays.copyOf(file, 14));
-      // Track: tempo meta, then at tick 960 the pedal CC before the note-on.
+      // One tick per grid step: 128 per beat.
+      assertArrayEquals(new byte[] { 'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, (byte) 128 },
+         java.util.Arrays.copyOf(file, 14));
+      // Track: tempo meta, then at tick 128 (step 128) the pedal CC before the note-on.
       final byte[] track = java.util.Arrays.copyOfRange(file, 22, file.length);
       assertArrayEquals(new byte[] { 0, (byte) 0xFF, 0x51, 0x03, 0x07, (byte) 0xA1, 0x20 },
          java.util.Arrays.copyOf(track, 7));
-      assertArrayEquals(new byte[] { (byte) 0x87, 0x40, (byte) 0xB9, 4, 0, 0, (byte) 0x99, 42,
+      assertArrayEquals(new byte[] { (byte) 0x81, 0x00, (byte) 0xB9, 4, 0, 0, (byte) 0x99, 42,
          100 }, java.util.Arrays.copyOfRange(track, 7, 16));
       // Ends with end-of-track at the comp length (4 beats).
       assertArrayEquals(new byte[] { (byte) 0xFF, 0x2F, 0 },
