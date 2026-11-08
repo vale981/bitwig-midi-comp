@@ -151,6 +151,8 @@ public class MidiCompExtension extends ControllerExtension
       int step;
       long at;
       long since;
+      /** With the transport stopped, start playback at the loop start instead of waiting. */
+      boolean startPlayback = true;
 
       LauncherPlay(final String comp, final double loopStartInClip, final double loopBeats)
       {
@@ -167,8 +169,29 @@ public class MidiCompExtension extends ControllerExtension
     * The launcher clip made by :meth:`playInLauncher`, kept in sync with the comp: after changes,
     * the comp is loaded into it again as a file, so its automation follows the comp.
     */
-   private record SyncedClip(int trackPosition, int sceneIndex, double loopBeats)
+   private record SyncedClip(int trackPosition, int sceneIndex, double loopBeats,
+      String quantization, double quantizationBeats)
    {
+   }
+
+   /**
+    * Returns the coarsest launch quantization on whose grid both the loop start and end lie, as
+    * ``(id, beats)``, so a clip launched just before the loop end starts exactly at the wrap.
+    * Loops that are not whole bars long need a finer grid than one bar.
+    */
+   private Map.Entry<String, Double> syncQuantization(final double loopStart, final double loopEnd)
+   {
+      final String[] ids = { "1", "1/2", "1/4", "1/8", "1/16" };
+      double grid = barBeats();
+      for (final String id : ids)
+      {
+         final boolean fits = Math.abs(loopStart / grid - Math.rint(loopStart / grid)) < 1e-6
+            && Math.abs(loopEnd / grid - Math.rint(loopEnd / grid)) < 1e-6;
+         if (fits && launchQuantizationId(id) != null)
+            return Map.entry(id, grid);
+         grid /= 2;
+      }
+      return null;
    }
 
    private SyncedClip syncedClip;
@@ -1391,6 +1414,19 @@ public class MidiCompExtension extends ControllerExtension
     */
    private Result transportAction(final String action)
    {
+      final SyncedClip synced = syncedClip;
+      final boolean starting = action.equals("play")
+         || (action.equals("toggle") && !transport.isPlaying().get());
+      if (starting && synced != null && live.link() != null
+         && live.link().trackPosition() == synced.trackPosition()
+         && live.link().sceneIndex() == synced.sceneIndex() && synced.sceneIndex() < LOAD_SCENES
+         && loadBank.getItemAt(0).position().get() == synced.trackPosition())
+      {
+         // Comping a launcher copy: start with the comp clip at the loop start.
+         transport.playStartPosition().set(transport.arrangerLoopStart().get());
+         loadBank.getItemAt(0).clipLauncherSlotBank().getItemAt(synced.sceneIndex()).launch();
+         return Result.ok("Playing from the loop start with the comp in the launcher");
+      }
       switch (action)
       {
          case "play" -> transport.play();
@@ -1521,14 +1557,18 @@ public class MidiCompExtension extends ControllerExtension
             launcherCursor.isLoopEnabled().set(true);
             launcherCursor.getLoopStart().set(play.loopStartInClip);
             launcherCursor.getLoopLength().set(play.loopBeats);
-            final String quantization = launchQuantizationId("1");
+            final double loopStart = transport.arrangerLoopStart().get();
+            final Map.Entry<String, Double> quantization =
+               syncQuantization(loopStart, loopStart + play.loopBeats);
             if (quantization != null)
-               launcherCursor.launchQuantization().set(quantization);
+               launcherCursor.launchQuantization().set(quantization.getKey());
             log("Playing in the launcher: clip loop set, launch quantization "
-               + (quantization == null ? "unchanged (no 1 bar value found)" : quantization));
+               + (quantization == null ? "unchanged (the loop is on no launch grid)"
+                  : quantization.getKey()));
             // Comp in the launcher clip from now on, with the same takes and cuts.
             syncedClip = new SyncedClip(selected.trackPosition(), selected.sceneIndex(),
-               play.loopBeats);
+               play.loopBeats, quantization == null ? null : quantization.getKey(),
+               quantization == null ? 0 : quantization.getValue());
             seenRevision = 0;
             carryAfterStart = play.comp;
             final Result started = startSession("launcher");
@@ -1543,10 +1583,25 @@ public class MidiCompExtension extends ControllerExtension
          {
             // Launch in the last bar of the arranger loop: it starts at the next bar line, which
             // is the loop start.
-            final double loopEnd =
-               transport.arrangerLoopStart().get() + transport.arrangerLoopDuration().get();
+            final double loopStart = transport.arrangerLoopStart().get();
+            final double loopEnd = loopStart + transport.arrangerLoopDuration().get();
             final double position = transport.playPosition().get();
-            if (transport.isPlaying().get() && position >= loopEnd - barBeats() && position < loopEnd)
+            final SyncedClip synced = syncedClip;
+            if (!transport.isPlaying().get() && play.startPlayback)
+            {
+               // Stopped: launching the clip starts playback, here from the loop start, so
+               // the arranger and the clip begin together.
+               transport.playStartPosition().set(loopStart);
+               play.slot.launch();
+               log("Playing in the launcher: started playback at the loop start with the comp");
+               lastMessage = "The comp plays from the launcher; the other tracks from the arranger";
+               markDirty();
+               launcherPlay = null;
+               return;
+            }
+            final double grid = synced != null && synced.quantizationBeats() > 0
+               ? synced.quantizationBeats() : barBeats();
+            if (transport.isPlaying().get() && position >= loopEnd - grid && position < loopEnd)
             {
                play.slot.launch();
                log("Playing in the launcher: launched, comes in at the next loop start");
@@ -1684,6 +1739,7 @@ public class MidiCompExtension extends ControllerExtension
          relaunch.slot = loadBank.getItemAt(0).clipLauncherSlotBank().getItemAt(link.sceneIndex());
          relaunch.slotIndex = link.sceneIndex();
          relaunch.step = synced != null ? 2 : 3;
+         relaunch.startPlayback = false;
          relaunch.since = now;
          relaunch.at = now + 600_000_000L;
          launcherPlay = relaunch;
@@ -1772,9 +1828,8 @@ public class MidiCompExtension extends ControllerExtension
                targetCursor.isLoopEnabled().set(true);
                targetCursor.getLoopStart().set(0);
                targetCursor.getLoopLength().set(synced.loopBeats());
-               final String quantization = launchQuantizationId("1");
-               if (quantization != null)
-                  targetCursor.launchQuantization().set(quantization);
+               if (synced.quantization() != null)
+                  targetCursor.launchQuantization().set(synced.quantization());
             }
             log("Following the reloaded clip again");
          }
