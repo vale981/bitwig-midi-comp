@@ -252,6 +252,8 @@ public class MidiCompExtension extends ControllerExtension
    private int repinStep;
    private long lastRepin;
    private long repinSince;
+   /** Length of a launcher session clip before a reload, restored afterwards; 0 if unknown. */
+   private double reloadLengthBeats;
    /** A comp to import once the next session has started. */
    private String carryAfterStart;
 
@@ -402,6 +404,7 @@ public class MidiCompExtension extends ControllerExtension
       targetCursor.clipLauncherSlot().isRecording().addValueObserver(v -> markDirty());
       targetCursor.clipLauncherSlot().isPlaying().markInterested();
       targetCursor.playingStep().markInterested();
+      targetCursor.getPlayStop().markInterested();
    }
 
    /** One track with its launcher slots, scrolled to the comp track for loading comps. */
@@ -1498,7 +1501,9 @@ public class MidiCompExtension extends ControllerExtension
       final String clipName = file.getFileName().toString().replaceFirst("\\.mid$", "");
       if (launcher)
       {
-         // Into the session's own slot; the extension follows the new clip afterwards.
+         // Into the session's own slot; the extension follows the new clip afterwards, and
+         // gives it the current length again.
+         reloadLengthBeats = sessionAvailable() ? sessionClip().clip().getPlayStop().get() : 0;
          slotLoad = new SlotLoad(live.link().trackPosition(), live.link().sceneIndex(),
             file.toString(), clipName, true);
          return Result.ok("Loading the comp into " + live.link().label());
@@ -1584,6 +1589,9 @@ public class MidiCompExtension extends ControllerExtension
                   play.at = now + 200_000_000L;
                return;
             }
+            // Bitwig rounds an imported file's length up to whole bars; the clip is one loop.
+            launcherCursor.getPlayStart().set(0);
+            launcherCursor.getPlayStop().set(play.loopBeats);
             launcherCursor.isLoopEnabled().set(true);
             launcherCursor.getLoopStart().set(play.loopStartInClip);
             launcherCursor.getLoopLength().set(play.loopBeats);
@@ -1884,11 +1892,18 @@ public class MidiCompExtension extends ControllerExtension
                && synced.sceneIndex() == repinScene)
             {
                // A new clip has default settings: loop and quantize it for the synced launch.
+               targetCursor.getPlayStart().set(0);
+               targetCursor.getPlayStop().set(synced.loopBeats());
                targetCursor.isLoopEnabled().set(true);
                targetCursor.getLoopStart().set(0);
                targetCursor.getLoopLength().set(synced.loopBeats());
                if (synced.quantization() != null)
                   targetCursor.launchQuantization().set(synced.quantization());
+            }
+            else if (reloadLengthBeats > 0)
+            {
+               // Imported files are rounded up to whole bars: keep the clip as long as before.
+               targetCursor.getPlayStop().set(reloadLengthBeats);
             }
             log("Following the reloaded clip again");
          }
