@@ -32,6 +32,14 @@ final class CompModel
    private final List<Take> takes = new ArrayList<>();
    private List<Segment> segments = List.of();
    private final Deque<List<Segment>> undo = new ArrayDeque<>();
+   /** Counts changes of takes or segments, so callers can notice them. */
+   private long revision;
+
+   /** Returns a number that changes whenever takes or segments change. */
+   long revision()
+   {
+      return revision;
+   }
    private int nextId = 1;
 
    List<Take> takes()
@@ -104,6 +112,7 @@ final class CompModel
       final Take take =
          new Take(nextId++, name, source, length, List.copyOf(notes), List.copyOf(sorted));
       takes.add(take);
+      revision++;
       if (segments.isEmpty())
          assign(0, length, take.id());
       return take;
@@ -133,6 +142,7 @@ final class CompModel
       pushUndo();
       takes.removeIf(t -> t.id() == id);
       segments = withoutMissingTakes(segments);
+      revision++;
       return true;
    }
 
@@ -154,6 +164,7 @@ final class CompModel
          if (t.id() == id)
          {
             takes.set(i, new Take(t.id(), name, t.source(), t.length(), t.notes(), t.controls()));
+            revision++;
             return true;
          }
       }
@@ -191,6 +202,7 @@ final class CompModel
          result.add(new Segment(from, to, takeId));
 
       segments = merged(result);
+      revision++;
    }
 
    /** Reverts the last segment change. Returns whether anything was undone. */
@@ -200,6 +212,7 @@ final class CompModel
       if (previous == null)
          return false;
       segments = withoutMissingTakes(previous);
+      revision++;
       return true;
    }
 
@@ -226,6 +239,7 @@ final class CompModel
          if (s[1] > s[0])
             list.add(new Segment(s[0], s[1], ids.get(s[2])));
       this.segments = merged(list);
+      revision++;
    }
 
    /**
@@ -320,6 +334,7 @@ final class CompModel
    {
       takes.clear();
       segments = List.of();
+      revision++;
       undo.clear();
    }
 

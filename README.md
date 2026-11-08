@@ -82,8 +82,9 @@ Two parts:
    automation and loop line up without further settings. It sets a launch quantization of one
    bar, moves the session to that clip (takes and cuts, cropped the same way, come along) and
    launches it in the last bar of the arranger loop, so it comes in at the next loop start and
-   wraps with the arranger. Edits then go to the launcher clip; its automation is refreshed
-   with *Load into Bitwig*. When the comp is done, copy the clip into the arranger at the loop
+   wraps with the arranger. Edits then go to the launcher clip, and about a second after the last
+   edit the comp is loaded into it again as a file, so the automation follows the comp; if the
+   clip was playing, it is relaunched at the next loop start. When the comp is done, copy the clip into the arranger at the loop
    start and use *Back to arrangement* in Bitwig. *Revert* restores the clip as it
    was before the session and ends it.
 

@@ -147,4 +147,22 @@ class CompModelTest
       assertEquals(take.notes(), model.takes().get(0).notes());
       assertFalse(model.renameTake(take.id() + 100, "Nope"));
    }
+
+   @Test
+   void theRevisionCountsChanges()
+   {
+      final CompModel model = new CompModel();
+      final long start = model.revision();
+      final Take take = model.addTake("Pass 1", Take.Source.ARRANGER, 512, List.of(note(0, 60, 0.5)));
+      final long added = model.revision();
+      assertTrue(added > start);
+      model.assign(0, 256, -1);
+      assertTrue(model.revision() > added);
+      final long assigned = model.revision();
+      model.renderControls();
+      model.render(1.0 / 128);
+      assertEquals(assigned, model.revision()); // reading does not count
+      model.renameTake(take.id(), "Verse");
+      assertTrue(model.revision() > assigned);
+   }
 }

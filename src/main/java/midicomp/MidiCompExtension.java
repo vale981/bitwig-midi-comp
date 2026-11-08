@@ -162,6 +162,20 @@ public class MidiCompExtension extends ControllerExtension
 
    /** Set up by :meth:`playInLauncher`; the clip is waiting to be loaded while ``slot`` is null. */
    private LauncherPlay launcherPlay;
+
+   /**
+    * The launcher clip made by :meth:`playInLauncher`, kept in sync with the comp: after changes,
+    * the comp is loaded into it again as a file, so its automation follows the comp.
+    */
+   private record SyncedClip(int trackPosition, int sceneIndex, double loopBeats)
+   {
+   }
+
+   private SyncedClip syncedClip;
+   private long syncedRevision;
+   private long seenRevision;
+   private long revisionChangedAt;
+   private static final long RELOAD_DELAY_NANOS = 1_200_000_000L;
    /** A MIDI file waiting for :member:`loadBank` to reach the comp track. */
    private String pendingLoad;
    private long pendingLoadAt;
@@ -317,6 +331,7 @@ public class MidiCompExtension extends ControllerExtension
       targetCursor.clipLauncherSlot().name().addValueObserver(v -> markDirty());
       targetCursor.clipLauncherSlot().sceneIndex().addValueObserver(v -> identityChanged(target));
       targetCursor.clipLauncherSlot().isRecording().addValueObserver(v -> markDirty());
+      targetCursor.clipLauncherSlot().isPlaying().markInterested();
       targetCursor.playingStep().markInterested();
    }
 
@@ -446,6 +461,7 @@ public class MidiCompExtension extends ControllerExtension
       learnClipStart();
       tickLoad();
       tickLauncherPlay();
+      tickSyncedReload();
       if (server != null)
          server.publishPlayhead(playheadJson());
 
@@ -1426,6 +1442,8 @@ public class MidiCompExtension extends ControllerExtension
       final long now = System.nanoTime();
       if (play == null || play.slot == null || now < play.at)
          return;
+      if (play.comp == null && play.step < 2)
+         play.step = 2; // a relaunch after a reload: only the timing is left
       switch (play.step)
       {
          case 0 ->
@@ -1461,6 +1479,9 @@ public class MidiCompExtension extends ControllerExtension
             log("Playing in the launcher: clip loop set, launch quantization "
                + (quantization == null ? "unchanged (no 1 bar value found)" : quantization));
             // Comp in the launcher clip from now on, with the same takes and cuts.
+            syncedClip = new SyncedClip(selected.trackPosition(), selected.sceneIndex(),
+               play.loopBeats);
+            seenRevision = 0;
             carryAfterStart = play.comp;
             final Result started = startSession("launcher");
             if (!started.ok())
@@ -1495,6 +1516,56 @@ public class MidiCompExtension extends ControllerExtension
             }
             play.at = now + 20_000_000L;
          }
+      }
+   }
+
+   /**
+    * Reloads the synced launcher clip (:member:`syncedClip`) from a file once the comp has not
+    * changed for a moment, so its automation follows the comp; relaunches it at the next loop
+    * start if it was playing, since replacing the clip can interrupt it.
+    */
+   private void tickSyncedReload()
+   {
+      final SyncedClip synced = syncedClip;
+      if (synced == null)
+         return;
+      final ClipRef link = live.link();
+      if (link == null || link.source() != Take.Source.LAUNCHER
+         || link.trackPosition() != synced.trackPosition() || link.sceneIndex() != synced.sceneIndex())
+      {
+         if (pendingStart == null && carryAfterStart == null && launcherPlay == null)
+            syncedClip = null; // the session moved elsewhere
+         else
+            seenRevision = 0; // still starting: take the started session as the baseline
+         return;
+      }
+      final long now = System.nanoTime();
+      final long revision = model.revision();
+      if (revision != seenRevision)
+      {
+         if (seenRevision == 0)
+            syncedRevision = revision; // the session's starting point is already in the clip
+         seenRevision = revision;
+         revisionChangedAt = now;
+      }
+      if (revision == syncedRevision || now - revisionChangedAt < RELOAD_DELAY_NANOS
+         || launcherPlay != null || isRecording())
+         return;
+      syncedRevision = revision;
+      final ClipLauncherSlot slot = targetCursor.clipLauncherSlot();
+      final boolean playing = slot.isPlaying().get();
+      final Result loaded = loadIntoBitwig();
+      log("Comp changed: " + loaded.message() + (playing ? "; relaunching at the next loop start"
+         : ""));
+      if (loaded.ok() && playing)
+      {
+         final LauncherPlay relaunch = new LauncherPlay(null, 0, synced.loopBeats());
+         relaunch.slot = slot;
+         relaunch.slotIndex = synced.sceneIndex();
+         relaunch.step = 2;
+         relaunch.since = now;
+         relaunch.at = now + 600_000_000L;
+         launcherPlay = relaunch;
       }
    }
 
