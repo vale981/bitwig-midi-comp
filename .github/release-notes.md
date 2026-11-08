@@ -1,26 +1,32 @@
 Comping for MIDI clips in Bitwig Studio: record loop passes, then cut them together in the
-companion app while the clip updates live. See the [README](https://github.com/vale981/bitwig-midi-comp#readme)
+companion app and hear the comp while you edit. See the [README](https://github.com/vale981/bitwig-midi-comp#readme)
 for the workflow.
 
-**This is an alpha.** It has been used on Linux with arranger clips and, since this release,
-the clip launcher; macOS and Windows are built by CI but barely tested. Saved comps live in the companion's data directory,
-so a broken session can be restored from there. Please report problems with the extension log
-(*Log* in the companion).
+**This is an alpha.** It has been used on Linux with arranger clips and the clip launcher;
+macOS and Windows are built by CI but barely tested, and Preview has only been tried on Linux.
+Saved comps live in the companion's data directory, so a broken session can be restored from
+there. Please report problems with the extension log (*Log* in the companion).
 
 ### New in this alpha
 
-- **Pedals and controllers:** CC (hi-hat pedal, sustain, mod wheel), channel pressure and pitch
-  bend are recorded with every take, follow the cuts and show as curves in the lanes. *Load
-  into Bitwig* brings them into Bitwig as a MIDI file.
-- **Comping in the clip launcher:** *Play in launcher* plays the comped loop from the launcher in
-  sync with the arrangement and reloads it with its controllers after each edit; *Back to
-  arranger* brings the edits back.
-- **Transport from the companion:** a playhead, play and stop (`Space`), and moving the playhead
-  by clicking the ruler or with the arrow keys.
-- **Takes:** rename them by double-clicking; fast repeated hits on one key (closed hi-hats) are
-  kept.
-- **Linux:** `midi_copies.py` and its NixOS module give every MIDI device its own virtual copy,
-  so Bitwig and the companion can use a keyboard at the same time.
+- **Preview:** the companion plays the comp, pedals and controllers included, as live MIDI into
+  the comp track while Bitwig plays, so every edit is heard at once; ending the preview writes
+  the comp into the clip. Timing follows Bitwig's MIDI clock when it is sent to the companion's
+  port. It needs a MIDI port into Bitwig: on Linux the port's virtual copy, on macOS a virtual
+  port, on Windows a [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) port
+  named "MIDI Comp". Delete the clip's automation lanes before previewing a comp with
+  controllers; the companion reminds you. *Play in launcher* stays as the fallback.
+- **MIDI setup in the companion:** *MIDI* in the toolbar holds the keyboard choice and checks the
+  preview setup: which ports to pick in Bitwig (by the names Bitwig shows), whether the comp
+  track plays the preview, and whether the MIDI clock arrives.
+- **Simpler toolbar:** two rows, with Preview next to Record and less used actions (*Add take*,
+  *Load into Bitwig*, *New version*, *Play in launcher*, *Revert*) in a *Clip* menu.
+- **Current recording and comp:** the toolbar shows and renames both, and *Saved comps* marks
+  them.
+- **Controllers at cuts:** a controller that a take never moved returns to rest (0, pitch bend
+  centered) at that take's cuts, also in MIDI files from *Load into Bitwig*.
+- **Fixed:** every full write into the clip was done twice ("missing ... writing again" in the
+  log).
 
 ### Files
 
@@ -29,9 +35,11 @@ so a broken session can be restored from there. Please report problems with the 
   Controllers*. Requires Bitwig Studio with extension API 18 or newer.
 - `midicomp-companion-<platform>.zip`: the companion app.
   - Linux: needs GLFW 3 and ALSA (`libglfw3`, `libasound2` on Debian and Ubuntu). Bitwig
-    and the companion cannot both open a keyboard; see *MIDI copies on Linux* in the README.
+    and the companion cannot both open a MIDI controller; see *MIDI copies on Linux* in the
+    README.
   - macOS: the app is not signed. After unzipping, run
     `xattr -d com.apple.quarantine midicomp-companion` once.
   - Windows: not signed, so SmartScreen asks for confirmation. Classic MIDI drivers allow one
-    program per device; see *Sharing the keyboard* in the README.
-- `midi_copies.py`: gives every MIDI device a virtual copy on Linux (see the README).
+    program per device; see *Sharing a MIDI controller* in the README.
+- `midi_copies.py`: gives every MIDI device (and the companion's preview port) a virtual copy on
+  Linux (see the README).

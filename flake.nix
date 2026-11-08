@@ -9,7 +9,7 @@
       fontFor = pkgs: "${pkgs.inter}/share/fonts/truetype/InterVariable.ttf";
       companionFor = pkgs: pkgs.stdenv.mkDerivation {
         pname = "midicomp-companion";
-        version = "0.1.0-alpha.2";
+        version = "0.1.0-alpha.3";
         # Exclude local build output, which `path:` flakes would otherwise copy.
         src = pkgs.lib.cleanSourceWith {
           src = ./companion;
