@@ -28,6 +28,34 @@ double Playhead::stepAt(const std::chrono::steady_clock::time_point now) const {
     return step + std::clamp(elapsed, 0.0, 0.25) * stepsPerSecond;
 }
 
+double PlayheadFollower::position(const Playhead& latest,
+                                  const std::chrono::steady_clock::time_point now) {
+    const auto extrapolate = [&](const std::chrono::steady_clock::time_point t) {
+        const double elapsed = std::chrono::duration<double>(t - anchorTime_).count();
+        return anchor_ + (playing_ ? std::clamp(elapsed, 0.0, 0.25) * stepsPerSecond_ : 0.0);
+    };
+    if (latest.at != seen_) {
+        seen_ = latest.at;
+        const double predicted = extrapolate(latest.at);
+        const double error = latest.step - predicted;
+        const bool jump = !latest.playing || !playing_ || latest.step < 0 || anchor_ < 0.0 ||
+                          std::abs(error) > 0.1 * std::max(1.0, latest.stepsPerSecond);
+        // Within 0.1 s of the prediction: correct a fifth of the difference per update.
+        anchor_ = jump ? latest.step : predicted + 0.2 * error;
+        anchorTime_ = latest.at;
+        playing_ = latest.playing;
+        stepsPerSecond_ = latest.stepsPerSecond;
+        if (jump)
+            shown_ = anchor_;
+    }
+    if (anchor_ < 0.0)
+        return -1.0;
+    const double next = extrapolate(now);
+    // While playing the line only moves forward; corrections catch up instead of stepping back.
+    shown_ = playing_ ? std::max(shown_, next) : next;
+    return shown_;
+}
+
 std::optional<Playhead> parsePlayhead(const std::string_view json) {
     try {
         const auto j = nlohmann::json::parse(json);

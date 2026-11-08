@@ -48,6 +48,37 @@ struct Playhead {
 };
 
 /**
+ * Turns playhead updates into a smoothly moving position.
+ *
+ * Updates arrive about 20 times a second and lag slightly behind the extrapolated position, so
+ * resetting to each one would pull the line back a little every time. Small differences are
+ * corrected gradually and never backwards while playing; jumps (loop wraps, seeking, stopping)
+ * are taken over at once.
+ */
+class PlayheadFollower {
+  public:
+    /**
+     * Returns the step to show at ``now``.
+     *
+     * Args:
+     *     latest: the latest playhead update.
+     *     now: the current time.
+     *
+     * Returns:
+     *     The step, or a negative value when there is no playhead.
+     */
+    double position(const Playhead& latest, std::chrono::steady_clock::time_point now);
+
+  private:
+    std::chrono::steady_clock::time_point seen_{};  ///< ``at`` of the last update taken over.
+    std::chrono::steady_clock::time_point anchorTime_{};
+    double anchor_ = -1.0;
+    double shown_ = -1.0;
+    bool playing_ = false;
+    double stepsPerSecond_ = 0.0;
+};
+
+/**
  * Parses a playhead document.
  *
  * Args:

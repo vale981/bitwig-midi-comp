@@ -70,6 +70,7 @@ void CompView::draw(ApiClient& client) {
     const bool comping = state != nullptr && state->session.has_value();
     client.setPollPlayhead(comping);
     playhead_ = comping ? client.playhead() : Playhead{};
+    playheadStep_ = follower_.position(playhead_, std::chrono::steady_clock::now());
     handleScaleKeys();
 
     drawToolbar(client, state);
@@ -892,7 +893,7 @@ void CompView::handleRulerInput(ApiClient& client, const State& state, const Lay
 
 void CompView::drawPlayhead(ImDrawList* dl, const State& state, const Layout& layout, const float y,
                             const float height, const bool marker) const {
-    const double step = playhead_.stepAt(std::chrono::steady_clock::now());
+    const double step = playheadStep_;
     if (step < 0.0 || step > static_cast<double>(state.length))
         return;
     const float x =

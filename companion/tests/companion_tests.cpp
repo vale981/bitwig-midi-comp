@@ -334,6 +334,25 @@ void testPlayhead() {
     playhead->playing = false;
     CHECK(playhead->stepAt(t0 + std::chrono::seconds(1)) == 1000.0);
     CHECK(!parsePlayhead("nope").has_value());
+
+    // The follower never steps back for an update that lags slightly, and snaps on jumps.
+    using std::chrono::milliseconds;
+    PlayheadFollower follower;
+    Playhead p{.playing = true, .step = 1000, .stepsPerSecond = 512.0, .canSeek = true, .at = t0};
+    CHECK(std::abs(follower.position(p, t0) - 1000.0) < 1e-6);
+    const double before = follower.position(p, t0 + milliseconds(50));  // 1025.6
+    p.step = 1020;  // 50 ms later Bitwig reports a position 10 ms behind
+    p.at = t0 + milliseconds(50);
+    const double after = follower.position(p, t0 + milliseconds(50));
+    CHECK(after >= before);
+    CHECK(follower.position(p, t0 + milliseconds(100)) > after);
+    p.step = 0;  // loop wrap
+    p.at = t0 + milliseconds(120);
+    CHECK(follower.position(p, t0 + milliseconds(120)) == 0.0);
+    p.playing = false;
+    p.step = 512;  // stopped elsewhere
+    p.at = t0 + milliseconds(200);
+    CHECK(follower.position(p, t0 + milliseconds(300)) == 512.0);
 }
 
 void testSettings() {

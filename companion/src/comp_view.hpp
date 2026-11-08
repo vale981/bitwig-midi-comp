@@ -250,6 +250,8 @@ class CompView {
     bool redraw_ = false;                    ///< Another frame is needed to settle the layout.
     bool inputBlocked_ = false;
     Playhead playhead_;                      ///< Snapshot for the current frame.
+    PlayheadFollower follower_;              ///< Smooths :member:`playhead_` between updates.
+    double playheadStep_ = -1.0;             ///< Position to draw this frame.
     int renamingTake_ = -1;                  ///< Take whose name is being edited, or -1.
     bool renameFocus_ = false;               ///< Focus the name field on the next frame.
     std::array<char, 64> takeNameBuffer_{};  ///< A clip must be selected in Bitwig before editing.
