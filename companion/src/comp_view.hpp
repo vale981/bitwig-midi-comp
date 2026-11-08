@@ -140,6 +140,9 @@ class CompView {
     void drawSessionStatus(const State& state);
     void drawLanes(ApiClient& client, const State& state);
     void drawRuler(ImDrawList* dl, const State& state, const Layout& layout, float y) const;
+    /** Moves the playhead to a clicked ruler position (arranger clips). */
+    void handleRulerInput(ApiClient& client, const State& state, const Layout& layout,
+                          float height);
     /** Draws the playhead over ``[y, y + height)``; ``marker`` adds the triangle on the ruler. */
     void drawPlayhead(ImDrawList* dl, const State& state, const Layout& layout, float y,
                       float height, bool marker) const;

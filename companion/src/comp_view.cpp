@@ -781,6 +781,7 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
         drawSegments(dl, state, layout, rulerHeight, compHeight, -1);
         drawNotes(dl, state.comp, state, layout, rulerHeight, compHeight, -1);
         drawPlayhead(dl, state, layout, 0.0f, topHeight, true);
+        handleRulerInput(client, state, layout, rulerHeight);
         handleLaneInput(client, state, layout, -1, rulerHeight, compHeight);
 
         const float hx = layout.origin.x + layout.visibleLeft - headerWidth;
@@ -863,6 +864,32 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
     drawHints(state);
 }
 
+void CompView::handleRulerInput(ApiClient& client, const State& state, const Layout& layout,
+                                const float height) {
+    const float lanesWidth = std::max(1.0f, static_cast<float>(state.length) * layout.pxPerStep);
+    ImGui::SetCursorPos(ImVec2(layout.headerWidth, 0.0f));
+    ImGui::SetNextItemAllowOverlap();
+    ImGui::InvisibleButton("ruler", ImVec2(lanesWidth, height));
+    if (!ImGui::IsItemHovered())
+        return;
+    if (!playhead_.canSeek) {
+        ImGui::SetItemTooltip(
+            "%s", state.session->source == "launcher"
+                      ? "Bitwig does not let extensions move the playhead in launcher clips"
+                      : "Play the clip once, then click here to move the playhead");
+        return;
+    }
+    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    ImGui::SetItemTooltip("Click to move the playhead (Shift: off the grid)");
+    if (!ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        return;
+    int step = std::clamp(stepAt(layout, ImGui::GetIO().MousePos.x), 0, state.length);
+    if (!ImGui::GetIO().KeyShift)
+        if (const auto cell = snapRange(step, step, gridSteps(state), state.length))
+            step = cell->first;
+    client.send("seek", {{"step", str(step)}});
+}
+
 void CompView::drawPlayhead(ImDrawList* dl, const State& state, const Layout& layout, const float y,
                             const float height, const bool marker) const {
     const double step = playhead_.stepAt(std::chrono::steady_clock::now());
@@ -874,7 +901,10 @@ void CompView::drawPlayhead(ImDrawList* dl, const State& state, const Layout& la
         return;
     const float scale = ImGui::GetFontSize() / 13.0f;
     const float top = layout.origin.y + y;
-    dl->AddLine(ImVec2(x, top), ImVec2(x, top + height), palette_.playhead, 1.5f * scale);
+    // A rectangle rather than AddLine, which shifts by half a pixel and would put the line
+    // beside the marker's tip.
+    const float half = 0.75f * scale;
+    dl->AddRectFilled(ImVec2(x - half, top), ImVec2(x + half, top + height), palette_.playhead);
     if (marker) {
         const float w = 5.0f * scale;
         dl->AddTriangleFilled(ImVec2(x - w, top), ImVec2(x + w, top), ImVec2(x, top + w * 1.4f),

@@ -35,6 +35,7 @@ struct Playhead {
     bool playing = false;
     int step = -1;  ///< Step being played, or -1 outside the clip.
     double stepsPerSecond = 0.0;
+    bool canSeek = false;  ///< ``seek`` works (arranger clip whose position is known).
     std::chrono::steady_clock::time_point at{};  ///< When it was received.
 
     /**

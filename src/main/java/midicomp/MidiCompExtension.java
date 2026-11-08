@@ -127,6 +127,11 @@ public class MidiCompExtension extends ControllerExtension
    private String sessionFingerprint = "";
    /** A duplicate of the session clip waiting to be selected, see :meth:`newVersion`. */
    private PendingVersion pendingVersion;
+   /**
+    * Arrangement beat at which the arranger session clip starts, learned while it plays (the API
+    * does not expose clip positions); ``NaN`` until known. Recent estimates, for their median.
+    */
+   private final ArrayDeque<Double> clipStartEstimates = new ArrayDeque<>();
    /** A comp to import once the next session has started. */
    private String carryAfterStart;
 
@@ -198,6 +203,7 @@ public class MidiCompExtension extends ControllerExtension
       transport.timeSignature().numerator().addValueObserver(v -> markDirty());
       transport.timeSignature().denominator().addValueObserver(v -> markDirty());
       transport.playPosition().markInterested();
+      transport.playStartPosition().markInterested();
       transport.isPlaying().addValueObserver(v -> markDirty());
       transport.isArrangerRecordEnabled().addValueObserver(v -> markDirty());
       transport.isArrangerLoopEnabled().markInterested();
@@ -387,6 +393,7 @@ public class MidiCompExtension extends ControllerExtension
       tickVersion();
       tickSession();
       updatePreview();
+      learnClipStart();
       if (server != null)
          server.publishPlayhead(playheadJson());
 
@@ -450,6 +457,7 @@ public class MidiCompExtension extends ControllerExtension
          case "newVersion" -> newVersion();
          case "record" -> startRecording(!"false".equals(p.get("stopAtEnd")));
          case "stopRecording" -> stopRecording();
+         case "seek" -> seek(intParam(p, "step"));
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -743,6 +751,7 @@ public class MidiCompExtension extends ControllerExtension
          pinTargetToSelection();
       live.link(ref, content);
       sessionFingerprint = Fingerprint.of(content, stepSize);
+      clipStartEstimates.clear();
       capture.start();
       log("Comping " + ref.label() + ": " + selected.describe());
       if (carryAfterStart != null)
@@ -1215,8 +1224,19 @@ public class MidiCompExtension extends ControllerExtension
       int step = -1;
       if (live.link() != null)
       {
-         if (sessionAvailable())
+         if (sessionAvailable() && playing)
             step = sessionClip().clip().playingStep().get();
+         final double clipStart = arrangerClipStart();
+         if (step < 0 && !Double.isNaN(clipStart) && !isRecording())
+         {
+            // From the transport: while playing with the clip deselected, or the play start
+            // position while stopped.
+            final double beat =
+               (playing ? transport.playPosition().get() : transport.playStartPosition().get())
+                  - clipStart;
+            if (beat >= 0 && beat * (1.0 / stepSize) <= model.length())
+               step = (int) Math.round(beat / stepSize);
+         }
          if (step < 0 && live.link().source() == Take.Source.ARRANGER && isRecording()
             && !Double.isNaN(lastPosition))
          {
@@ -1228,8 +1248,70 @@ public class MidiCompExtension extends ControllerExtension
       }
       final double stepsPerSecond = transport.tempo().value().getRaw() / 60.0 / stepSize;
       return String.format(java.util.Locale.ROOT,
-         "{\"playing\":%b,\"step\":%d,\"stepsPerSecond\":%.3f}", playing && step >= 0, step,
-         stepsPerSecond);
+         "{\"playing\":%b,\"step\":%d,\"stepsPerSecond\":%.3f,\"canSeek\":%b}",
+         playing && step >= 0, step, stepsPerSecond, !Double.isNaN(arrangerClipStart()));
+   }
+
+   /**
+    * Learns where the arranger session clip starts: while it plays, the transport position minus
+    * the clip's playing position. The median of recent estimates absorbs update delays.
+    */
+   private void learnClipStart()
+   {
+      if (live.link() == null || live.link().source() != Take.Source.ARRANGER)
+      {
+         clipStartEstimates.clear();
+         return;
+      }
+      if (!transport.isPlaying().get() || !sessionAvailable())
+         return;
+      final int step = arranger.clip().playingStep().get();
+      if (step < 0)
+         return;
+      clipStartEstimates.addLast(transport.playPosition().get() - step * stepSize);
+      while (clipStartEstimates.size() > 32)
+         clipStartEstimates.removeFirst();
+   }
+
+   /**
+    * Returns the arrangement beat at which the arranger session clip starts: learned while it
+    * played, else from the last recording (the loop start in the clip), else ``NaN``.
+    */
+   private double arrangerClipStart()
+   {
+      if (live.link() == null || live.link().source() != Take.Source.ARRANGER)
+         return Double.NaN;
+      if (clipStartEstimates.size() >= 4)
+      {
+         final List<Double> sorted = new ArrayList<>(clipStartEstimates);
+         sorted.sort(null);
+         return sorted.get(sorted.size() / 2);
+      }
+      if (previewOffsetBeats != 0)
+         return transport.arrangerLoopStart().get() - Math.round(previewOffsetBeats * 4) / 4.0;
+      return Double.NaN;
+   }
+
+   /**
+    * Moves the playhead to a step of the arranger session clip, as clicking Bitwig's ruler does:
+    * sets the play start and jumps there while playing.
+    *
+    * Args:
+    *    step: grid step in the clip.
+    */
+   private Result seek(final int step)
+   {
+      if (live.link() == null)
+         return Result.fail("Start comping a clip first");
+      if (live.link().source() != Take.Source.ARRANGER)
+         return Result.fail("Bitwig does not let extensions move the playhead in launcher clips");
+      final double clipStart = arrangerClipStart();
+      if (Double.isNaN(clipStart))
+         return Result.fail("Play the clip once, so MIDI Comp learns where it starts");
+      transport.playStartPosition().set(clipStart + Math.max(0, step) * stepSize);
+      if (transport.isPlaying().get())
+         transport.jumpToPlayStartPosition();
+      return Result.ok("Playhead moved");
    }
 
    private void endPreview()
