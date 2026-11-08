@@ -82,6 +82,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -89,9 +90,16 @@ jobs:
         run: |
           mkdir release
           cp artifacts/MidiComp-extension/MidiComp.bwextension release/
+          cp tools/midi_copies.py release/
+          # Artifacts do not keep file modes; the binaries must be executable.
+          chmod +x artifacts/midicomp-companion-Linux/* artifacts/midicomp-companion-macOS/*
           for platform in Linux macOS Windows; do
             (cd "artifacts/midicomp-companion-$platform" && zip -r "../../release/midicomp-companion-$platform.zip" .)
           done
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*
+          body_path: .github/release-notes.md
+          # Tags such as v0.1.0-alpha.1 are pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true

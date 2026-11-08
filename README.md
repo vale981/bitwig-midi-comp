@@ -104,6 +104,8 @@ Support/midicomp/comps` (macOS) or `%APPDATA%\midicomp\comps` (Windows); `--stor
 changes it. Saved comps contain every note attribute and are restored at full fidelity, also
 after a change of the timing resolution.
 
+![Saved comps: recordings and the comps cut from them](docs/screenshots/comps.png)
+
 **Versions.** For launcher clips, *New version* duplicates the clip into another slot and
 continues comping the copy with the same takes and cuts; the original keeps its comp. The copy
 gets a version suffix in its title ("Lead" becomes "Lead v2"), so its comps are saved under their
@@ -207,6 +209,7 @@ python3 tools/midi_copies.py run          # keep it running, e.g. as a systemd u
 - `--screenshot FILE`: render for three seconds, save the window as PPM and exit.
 - `--demo-keyboard NAME`: show `NAME` in the keyboard picker without opening MIDI (screenshots).
 - `--scale FACTOR`: UI scale on top of the display's scale, for this run (0.5 to 4).
+- `--open-saved-comps`: open the list of saved comps (screenshots).
 - `MIDICOMP_FONT=/path/to/font.ttf`: UI font. Release builds embed Roboto; the Nix build uses Inter.
 
 The UI follows the display's scale (also when the window moves to another display). *View* in
@@ -263,6 +266,10 @@ env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 2560x15
   ./companion/build/midicomp-companion --endpoint /tmp/mock-endpoint.json \
   --demo-keyboard "USB Axiom 61" --scale 2 --screenshot out.ppm
 ```
+
+For `comps.png`, write sample saved comps with `python3 tools/mock_store.py DIR`, pass
+`--store-dir DIR --open-saved-comps`, and crop to the popup (1720x760 at 420,385). Screenshots
+ignore the mouse, so no hover effects show.
 
 GLFW prefers Wayland when `WAYLAND_DISPLAY` is set, so without unsetting it the window opens on
 the desktop instead of Xvfb. Pass `--theme-dir` with an empty directory for stock colors; the

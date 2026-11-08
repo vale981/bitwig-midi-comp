@@ -281,6 +281,9 @@ int main(int argc, char** argv) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;
+    // Screenshots should not show hover effects from wherever the pointer happens to be.
+    if (options->screenshot)
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse;
 
     midicomp::CompView view;
     view.setSettings(&settings, settingsPath());
