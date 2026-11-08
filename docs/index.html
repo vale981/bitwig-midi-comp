@@ -76,6 +76,7 @@
   h2 { font-size: 1.6rem; margin: 0 0 20px; }
   h3 { font-size: 1.1rem; margin: 0 0 6px; }
 
+  .section-lead { color: var(--subtle); margin: -8px 0 28px; max-width: 40em; }
   .steps { display: grid; gap: 40px; }
   .step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 28px; align-items: center; }
   .step p { margin: 0; color: var(--subtle); }
@@ -169,6 +170,28 @@
         <figure class="shot"><img src="screenshots/session-detail.png" width="1480" height="1000" loading="lazy"
              alt="The comp lane takes its first two bars from pass 1 and the next from pass 4"></figure>
       </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Pedals and controllers</h2>
+    <p class="section-lead">Hi-hat pedals, sustain pedals, mod wheels and pitch bend are recorded
+      with every take and follow your cuts, so a hi-hat keeps the opening it was played with.</p>
+    <div class="step">
+      <ol class="install">
+        <li><strong>Record and comp as usual.</strong> MIDI Comp picks up the pedals and
+          controllers along with the notes and shows them as curves under each take. Every cut
+          starts with its own take's pedal positions.</li>
+        <li><strong>Listen in the clip launcher.</strong> <em>Play in launcher</em> plays the
+          comped loop from Bitwig's clip launcher, in time with the rest of the arrangement.
+          Each change you make is in the clip a moment later, pedals included. Start and move
+          playback from MIDI Comp.</li>
+        <li><strong>Back to the arrangement.</strong> <em>Back to arranger</em> brings your
+          edits into the arrangement. A last copy of the finished clip, done in Bitwig, carries
+          the pedals and controllers over.</li>
+      </ol>
+      <figure class="shot"><img src="screenshots/session-cc.png" width="1500" height="860" loading="lazy"
+           alt="Take lanes with sustain pedal and pitch bend curves along the bottom"></figure>
     </div>
   </section>
 

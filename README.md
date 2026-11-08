@@ -68,34 +68,8 @@ Two parts:
    together, the comp stays as it is.
 
 4. **Finish.** *Done* ends the session; the clip keeps the comp. *Revert* restores the clip as it
-   was before the session and ends it.
-
-   The editor writes notes only; the extension API cannot write CC into clips. Control messages
-   played while recording (CC such as the hi-hat pedal or sustain, channel pressure, pitch bend)
-   are kept with each take, and a comp takes each cut's messages, starting with the take's
-   controller values at the cut. The lanes show them as curves along the bottom: sustain in
-   green, pitch bend in the accent color, other controllers muted. *Load into Bitwig* writes the comp with them as a MIDI file and
-   loads it: launcher comps directly into their slot, arranger comps into a free launcher slot of
-   the comp track, from where you copy them over the arranger clip (copy and paste in Bitwig, or
-   drag). The extension cannot take this step itself: copy and paste through the API lose the
-   clip's automation. The files are kept in `~/.midicomp/midi`. In launcher sessions this
-   happens by itself: about a second after the last edit, the clip is replaced by the comp with
-   its automation (deleted and loaded again, which also resets clip settings such as color and
-   launch options), and a playing clip is relaunched. Clips MIDI Comp loaded into other slots are
-   reused for later loads and removed by *Back to arranger*, as long as their names are
-   unchanged.
-
-   *Play in launcher* (arranger comps) plays the comp from the clip launcher while the other
-   tracks play the arrangement. It loads the part of the comp inside the arranger loop region
-   into a free launcher slot of the comp track, as a clip exactly one loop long, so its notes,
-   automation and loop line up without further settings. It sets a launch quantization of one
-   bar, moves the session to that clip (takes and cuts, cropped the same way, come along) and
-   launches it in the last bar of the arranger loop, so it comes in at the next loop start and
-   wraps with the arranger. Edits then go to the launcher clip, which is reloaded with its
-   automation after edits as described above; it is relaunched at the next loop start. *Back to arranger* returns the
-   track to the arrangement and continues the session in the arranger clip (select it first),
-   with the edits made in the launcher merged into the full comp. For its CC automation, copy a
-   clip loaded with *Load into Bitwig* over it.
+   was before the session and ends it. With pedals or other controllers, see
+   [Pedals and controllers](#pedals-and-controllers-cc).
 
 Takes recorded elsewhere (another track or launcher slot) can be added with *Add take*, which
 copies the selected clip's notes. They must start at the same position as the comp clip. A take is
@@ -151,6 +125,49 @@ gets a version suffix in its title ("Lead" becomes "Lead v2"), so its comps are 
 own name. For arranger clips, duplicate the clip to another track in Bitwig and comp the copy;
 the banner offers to continue with the comp. The API identifies arranger clips only by their
 track, so a copy on the same track would receive every edit as well.
+
+### Pedals and controllers (CC)
+
+Hi-hat pedals, sustain pedals, mod wheels and pitch bend send control messages rather than
+notes. MIDI Comp records them with the takes and comps them along with the notes. The extension
+API can only write notes into clips, though, so the controllers reach Bitwig through MIDI files,
+which Bitwig imports as clip automation.
+
+1. **Record** as usual. The companion reads control messages (CC, channel pressure, pitch bend)
+   from the keyboard together with the notes, including each controller's position before
+   recording starts, such as a hi-hat pedal held closed. Lane headers show how many a take has,
+   and the lanes draw them as curves along the bottom: sustain in green, pitch bend in the
+   accent color, other controllers muted.
+2. **Comp** as usual. Each cut brings its take's control messages and starts with the take's
+   controller values at the cut, so a cut never inherits the previous take's hi-hat opening or
+   sustain.
+3. **Listen in the launcher** (arranger comps). *Play in launcher* puts the part of the comp
+   inside the arranger loop region, with its controllers, into a launcher clip that plays in
+   sync with the arrangement, while the other tracks keep playing from the arranger. The clip
+   is exactly one loop long, launched on the coarsest grid that fits the loop, and comes in at
+   the loop start (with the transport stopped, playback starts there). The session continues
+   in that clip, with the same takes and cuts: about a second after each edit, the clip is
+   replaced by the new comp with its controllers. The play button, `Space`, the ruler and the
+   arrow keys start and move playback, clip and arrangement together.
+4. **Back to the arranger.** *Back to arranger* merges the edits into the full comp, returns the
+   track to the arrangement, removes the launcher clips MIDI Comp made and continues the
+   session in the arranger clip (select it first), which gets the comp's notes. For its
+   controllers, press *Load into Bitwig*: the comp goes into a free launcher slot of the track,
+   and you copy that clip over the arranger clip in Bitwig (copy and paste, or drag). This copy
+   is manual, because copy and paste through the API lose the automation.
+
+Comps of launcher clips need no extra steps: their clip is replaced with the comp and its
+controllers after each edit. *Load into Bitwig* does the same on demand.
+
+- Until a comp is loaded, the clip holds the automation Bitwig recorded, which belongs to the
+  last recorded pass, not to the comp.
+- The clip's original content (the first take) has no control messages: the API cannot read
+  them.
+- Replacing a launcher clip resets its settings, such as color and launch options. Clips from
+  *Play in launcher* get their loop and launch quantization back.
+- Clips MIDI Comp loaded into other slots are reused for later loads and removed by *Back to
+  arranger*, as long as their names are unchanged. The MIDI files are kept in
+  `~/.midicomp/midi`. They contain no tempo, so Bitwig does not ask about one.
 
 ## Installation
 
@@ -313,7 +330,9 @@ ignore the mouse, so no hover effects show.
 GLFW prefers Wayland when `WAYLAND_DISPLAY` is set, so without unsetting it the window opens on
 the desktop instead of Xvfb. Pass `--theme-dir` with an empty directory for stock colors; the
 README images use Rose Pine Dawn and, in the Theme section, the stock colors. `start.png` and
-`record.png` are cropped to 900 and 690 pixels in height.
+`record.png` are cropped to 900 and 690 pixels in height. The project page's
+`session-detail.png` (1480x1000 at 0,120) and `session-cc.png` (1500x860 at 0,560) are crops of
+`session-rose-pine-dawn.png`.
 
 ## Limitations
 
