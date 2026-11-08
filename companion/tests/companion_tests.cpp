@@ -260,6 +260,17 @@ void testCompStore() {
     CHECK(named && named->name == "Chorus take" && named->title() == "Chorus take");
     CHECK(store.newestFor("Song", "Bass", "")->title() == "Bass");
 
+    // Named comps survive pruning by later unnamed saves.
+    for (int i = 0; i < 15; ++i)
+        store.save("l" + std::to_string(i), exportDoc("Lead", 2), 7000 + i);
+    int leads = 0;
+    bool namedKept = false;
+    for (const auto& c : store.list()) {
+        leads += c.clip == "Lead" ? 1 : 0;
+        namedKept = namedKept || c.name == "Chorus take";
+    }
+    CHECK(namedKept && leads == static_cast<int>(CompStore::kKeepPerClip) + 1);
+
     CHECK(fileComponent("Keys / Take 1 (ä)") == "Keys___Take_1_____");  // ä is two bytes
     CHECK(fileComponent("") == "untitled");
 }
@@ -277,6 +288,37 @@ void testPreview() {
     CHECK(s.preview().size() == 1 && s.preview()[0].pass == 3);
     CHECK(s.preview()[0].notes.size() == 1 && s.preview()[0].notes[0].key == 40);
     CHECK(s.keyRange().first <= 40);  // provisional notes count for the key range
+}
+
+void testRecordingSets() {
+    const auto comp = [](std::string takes, std::string cuts, std::int64_t at, std::string name) {
+        return SavedComp{.path = {},
+                         .project = "Song",
+                         .clip = "Keys",
+                         .session = "s",
+                         .takes = 3,
+                         .savedAt = at,
+                         .fingerprint = {},
+                         .name = std::move(name),
+                         .takesKey = std::move(takes),
+                         .cutsKey = std::move(cuts),
+                         .cutsSummary = {}};
+    };
+    const auto sets = groupByRecordings({
+        comp("A", "x", 100, "Verse"),  // named, older save of cut x
+        comp("A", "x", 300, ""),       // autosave of the same cut
+        comp("A", "y", 200, ""),
+        comp("B", "z", 400, ""),
+    });
+    CHECK(sets.size() == 2);
+    CHECK(sets[0].takesKey == "B" && sets[1].takesKey == "A");  // newest first
+    CHECK(sets[1].comps.size() == 2);                           // cuts x and y
+    CHECK(sets[1].comps[0].cutsKey == "x" && sets[1].comps[0].name == "Verse");
+
+    const auto doc = takesOnly(R"({"takes":[{"length":2048},{"length":1024}],
+                                   "segments":[[0,100,1],[100,2048,0]]})");
+    CHECK(doc && doc->find(R"("segments":[[0,2048,0]])") != std::string::npos);
+    CHECK(!takesOnly("not json").has_value());
 }
 
 void testSettings() {
@@ -339,6 +381,7 @@ int main() {
         {"midi", testMidi},
         {"preview", testPreview},
         {"settings", testSettings},
+        {"recordings", testRecordingSets},
     };
     for (const auto& [name, test] : tests) {
         const int before = failures;

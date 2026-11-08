@@ -1,6 +1,7 @@
 #include "comp_store.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -27,12 +28,74 @@ fs::path envPath(const char* name) {
     return value != nullptr && *value != '\0' ? fs::path(value) : fs::path();
 }
 
+/** Returns a key for a JSON value (64-bit FNV-1a of its text), stable across runs. */
+std::string keyOf(const json& value) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const char c : value.dump()) {
+        hash ^= static_cast<unsigned char>(c);
+        hash *= 1099511628211ULL;
+    }
+    std::string key(16, '0');
+    for (int i = 15; i >= 0; --i, hash >>= 4)
+        key[static_cast<std::size_t>(i)] = kHex[hash & 0xF];
+    return key;
+}
+
+/** Describes which takes a comp's segments use, e.g. "takes 1, 3 · 4 cuts". */
+std::string summarizeCuts(const json& segments) {
+    std::vector<int> takes;
+    int cuts = 0;
+    for (const auto& s : segments) {
+        if (!s.is_array() || s.size() < 3)
+            continue;
+        ++cuts;
+        const int take = s[2].get<int>() + 1;
+        if (std::ranges::find(takes, take) == takes.end())
+            takes.push_back(take);
+    }
+    if (cuts == 0)
+        return "empty";
+    std::ranges::sort(takes);
+    std::string text = takes.size() == 1 ? "take " : "takes ";
+    for (std::size_t i = 0; i < takes.size(); ++i)
+        text += (i > 0 ? ", " : "") + std::to_string(takes[i]);
+    return text + " \u00b7 " + std::to_string(cuts) + (cuts == 1 ? " cut" : " cuts");
+}
+
+std::optional<json> readJson(const fs::path& path) {
+    const auto text = readFile(path);
+    if (!text)
+        return std::nullopt;
+    try {
+        return json::parse(*text);
+    } catch (const json::exception&) {
+        return std::nullopt;
+    }
+}
+
+bool writeJson(const fs::path& path, const json& value) {
+    const fs::path tmp = fs::path(path).concat(".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary);
+        if (!out)
+            return false;
+        out << value.dump();
+        if (!out)
+            return false;
+    }
+    std::error_code ec;
+    fs::rename(tmp, path, ec);
+    return !ec;
+}
+
 std::optional<SavedComp> readHeader(const fs::path& path) {
     const auto text = readFile(path);
     if (!text)
         return std::nullopt;
     try {
         const json j = json::parse(*text);
+        const json& comp = j.at("comp");
         return SavedComp{
             .path = path,
             .project = j.at("project").get<std::string>(),
@@ -42,6 +105,9 @@ std::optional<SavedComp> readHeader(const fs::path& path) {
             .savedAt = j.at("savedAt").get<std::int64_t>(),
             .fingerprint = j.value("fingerprint", std::string{}),
             .name = j.value("name", std::string{}),
+            .takesKey = keyOf(comp.at("takes")),
+            .cutsKey = keyOf(comp.value("segments", json::array())),
+            .cutsSummary = summarizeCuts(comp.value("segments", json::array())),
         };
     } catch (const json::exception&) {
         return std::nullopt;
@@ -49,6 +115,78 @@ std::optional<SavedComp> readHeader(const fs::path& path) {
 }
 
 }  // namespace
+
+bool CompStore::rename(const SavedComp& comp, const std::string_view name) {
+    const std::scoped_lock lock(mutex_);
+    auto doc = readJson(comp.path);
+    if (!doc || !doc->is_object())
+        return false;
+    (*doc)["name"] = std::string(name);
+    return writeJson(comp.path, *doc);
+}
+
+bool CompStore::remove(const SavedComp& comp) {
+    const std::scoped_lock lock(mutex_);
+    std::error_code ec;
+    return fs::remove(comp.path, ec);
+}
+
+std::string CompStore::recordingName(const std::string_view takesKey) const {
+    const std::scoped_lock lock(mutex_);
+    const auto names = readJson(dir_ / "recordings.json");
+    if (!names || !names->is_object())
+        return {};
+    return names->value(std::string(takesKey), std::string{});
+}
+
+bool CompStore::setRecordingName(const std::string_view takesKey, const std::string_view name) {
+    const std::scoped_lock lock(mutex_);
+    std::error_code ec;
+    fs::create_directories(dir_, ec);
+    json names = readJson(dir_ / "recordings.json").value_or(json::object());
+    if (!names.is_object())
+        names = json::object();
+    if (name.empty())
+        names.erase(std::string(takesKey));
+    else
+        names[std::string(takesKey)] = std::string(name);
+    return writeJson(dir_ / "recordings.json", names);
+}
+
+std::vector<RecordingSet> groupByRecordings(const std::vector<SavedComp>& comps) {
+    std::vector<SavedComp> sorted = comps;
+    std::ranges::sort(sorted, std::ranges::greater{}, &SavedComp::savedAt);
+    std::vector<RecordingSet> sets;
+    for (const SavedComp& comp : sorted) {
+        auto set = std::ranges::find(sets, comp.takesKey, &RecordingSet::takesKey);
+        if (set == sets.end()) {
+            sets.push_back(
+                RecordingSet{.takesKey = comp.takesKey, .comps = {}, .firstSaved = comp.savedAt});
+            set = sets.end() - 1;
+        }
+        set->firstSaved = std::min(set->firstSaved, comp.savedAt);
+        auto same = std::ranges::find(set->comps, comp.cutsKey, &SavedComp::cutsKey);
+        if (same == set->comps.end())
+            set->comps.push_back(comp);
+        else if (same->name.empty() && !comp.name.empty())
+            *same = comp;  // an older save of the same cut that has a name
+    }
+    return sets;
+}
+
+std::optional<std::string> takesOnly(const std::string_view exportJson) {
+    try {
+        json doc = json::parse(exportJson);
+        const json& takes = doc.at("takes");
+        if (takes.empty())
+            doc["segments"] = json::array();
+        else
+            doc["segments"] = json::array({json::array({0, takes[0].value("length", 0), 0})});
+        return doc.dump();
+    } catch (const json::exception&) {
+        return std::nullopt;
+    }
+}
 
 std::string fileComponent(const std::string_view text) {
     std::string out;
@@ -186,8 +324,9 @@ void CompStore::prune(const std::string_view project, const std::string_view cli
     for (const auto& entry : fs::directory_iterator(dir_, ec)) {
         if (entry.path().extension() != ".json")
             continue;
+        // Named comps are kept; only unnamed saves are pruned.
         if (auto header = readHeader(entry.path());
-            header && header->project == project && header->clip == clip)
+            header && header->project == project && header->clip == clip && header->name.empty())
             same.push_back(std::move(*header));
     }
     if (same.size() <= kKeepPerClip)

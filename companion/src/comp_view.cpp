@@ -1273,64 +1273,232 @@ void CompView::drawSavedComps(ApiClient& client, const State& state) {
         return;
     if (std::exchange(openSavedComps_, false))
         ImGui::OpenPopup("savedComps");
-    if (ImGui::IsPopupOpen("savedComps") && savedChoices_.empty()) {
-        // Best guess first (same title, else same notes), then the newest.
-        const auto best = store_->offerFor(state.project, state.session->label,
-                                           state.session->fingerprint, sessionId_);
-        if (best)
-            savedChoices_.push_back(*best);
-        for (const auto& comp : store_->list())
-            if (comp.project == state.project && comp.session != sessionId_ &&
-                (!best || comp.path != best->path))
-                savedChoices_.push_back(comp);
-        savedChoice_ = 0;
-    }
+    const auto& session = *state.session;
+    if (ImGui::IsPopupOpen("savedComps") && recordingSets_.empty())
+        refreshSavedChoices(state);
+    // A list this size belongs in the middle of the window rather than at the pointer.
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (!ImGui::BeginPopup("savedComps")) {
-        savedChoices_.clear();
+        recordingSets_.clear();
         return;
     }
-    ImGui::TextUnformatted("Saved comps of this project");
-    if (savedChoices_.empty())
-        ImGui::TextDisabled("None yet. Comps are saved shortly after every change.");
+
     const float scale = ImGui::GetFontSize() / 13.0f;
-    if (ImGui::BeginListBox("##saved", ImVec2(520.0f * scale, 240.0f * scale))) {
-        for (int i = 0; i < static_cast<int>(savedChoices_.size()); ++i) {
-            const SavedComp& comp = savedChoices_[static_cast<std::size_t>(i)];
-            std::string label = comp.title();
-            if (!comp.name.empty())
-                label += "  (" + comp.clip + ")";
-            label += "  \u00b7  " + formatTime(comp.savedAt) + ", " + str(comp.takes) + " takes";
-            if (i == 0 && comp.clip == state.session->label)
-                label += "  \u00b7  this clip";
-            else if (i == 0 && !comp.fingerprint.empty() &&
-                     comp.fingerprint == state.session->fingerprint)
-                label += "  \u00b7  same notes";
+    if (ImGui::Checkbox("All clips of this project", &showAllClips_))
+        refreshSavedChoices(state);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(otherwise this clip, by title or notes)");
+
+    const SavedComp* chosen = nullptr;
+    if (recordingSets_.empty()) {
+        ImGui::TextDisabled("No saved comps yet. Comps are saved shortly after every change.");
+    } else if (ImGui::BeginTable("savedComps", 2,
+                                 ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit,
+                                 ImVec2(760.0f * scale, 0.0f))) {
+        ImGui::TableSetupColumn("Recordings", ImGuiTableColumnFlags_WidthFixed, 330.0f * scale);
+        ImGui::TableSetupColumn("Comps", ImGuiTableColumnFlags_WidthStretch);
+        // Plain labels: the theme's header color is meant for dark text on light panels.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextDisabled("Recordings");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextDisabled("Comps of these recordings");
+        ImGui::TableNextRow();
+        const float listHeight = 220.0f * scale;
+        const float rowHeight = 2.0f * ImGui::GetTextLineHeightWithSpacing();
+
+        // Recordings: the takes, independent of how they are cut.
+        ImGui::TableSetColumnIndex(0);
+        ImGui::BeginChild("recordings", ImVec2(0.0f, listHeight));
+        for (int i = 0; i < static_cast<int>(recordingSets_.size()); ++i) {
+            const RecordingSet& set = recordingSets_[static_cast<std::size_t>(i)];
+            const std::string title = recordingTitle(set);
             ImGui::PushID(i);
-            if (ImGui::Selectable(label.c_str(), i == savedChoice_,
-                                  ImGuiSelectableFlags_AllowDoubleClick)) {
-                savedChoice_ = i;
+            // Two lines of text drawn over one selectable row.
+            const ImVec2 start = ImGui::GetCursorPos();
+            if (ImGui::Selectable("##set", i == savedSet_, ImGuiSelectableFlags_AllowOverlap,
+                                  ImVec2(0.0f, rowHeight)) &&
+                i != savedSet_) {
+                savedSet_ = i;
+                savedChoice_ = 0;
+                syncNameFields();
+            }
+            const ImVec2 after = ImGui::GetCursorPos();
+            ImGui::SetCursorPos(ImVec2(start.x + 4.0f * scale, start.y));
+            ImGui::BeginGroup();
+            ImGui::TextUnformatted(title.c_str());
+            const std::size_t cuts = set.comps.size();
+            ImGui::TextDisabled("%s \u00b7 %d takes \u00b7 %zu comp%s", set.newest().clip.c_str(),
+                                set.newest().takes, cuts, cuts == 1 ? "" : "s");
+            ImGui::EndGroup();
+            ImGui::SetCursorPos(after);
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##recordingName", "Name these recordings",
+                                 recordingNameBuffer_.data(), recordingNameBuffer_.size());
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            const RecordingSet& set = recordingSets_[static_cast<std::size_t>(savedSet_)];
+            store_->setRecordingName(set.takesKey, recordingNameBuffer_.data());
+            recordingNames_[set.takesKey] = recordingNameBuffer_.data();
+        }
+
+        // Comps: the ways these takes were cut.
+        ImGui::TableSetColumnIndex(1);
+        ImGui::BeginChild("comps", ImVec2(0.0f, listHeight));
+        const auto& comps = recordingSets_[static_cast<std::size_t>(savedSet_)].comps;
+        for (int i = 0; i < static_cast<int>(comps.size()); ++i) {
+            const SavedComp& comp = comps[static_cast<std::size_t>(i)];
+            std::string detail = comp.cutsSummary + " \u00b7 " + formatTime(comp.savedAt);
+            if (comp.clip != recordingSets_[static_cast<std::size_t>(savedSet_)].newest().clip)
+                detail += " \u00b7 " + comp.clip;
+            if (!comp.fingerprint.empty() && comp.fingerprint == session.fingerprint)
+                detail += " \u00b7 in this clip";
+            ImGui::PushID(i);
+            const ImVec2 start = ImGui::GetCursorPos();
+            if (ImGui::Selectable("##comp", i == savedChoice_,
+                                  ImGuiSelectableFlags_AllowOverlap |
+                                      ImGuiSelectableFlags_AllowDoubleClick,
+                                  ImVec2(0.0f, rowHeight))) {
+                if (i != savedChoice_) {
+                    savedChoice_ = i;
+                    syncNameFields();
+                }
                 if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     restore(client, comp);
                     restoreOffer_.reset();
                     ImGui::CloseCurrentPopup();
                 }
             }
+            const ImVec2 after = ImGui::GetCursorPos();
+            ImGui::SetCursorPos(ImVec2(start.x + 4.0f * scale, start.y));
+            ImGui::BeginGroup();
+            ImGui::TextUnformatted(comp.name.empty() ? "Unnamed comp" : comp.name.c_str());
+            ImGui::TextDisabled("%s", detail.c_str());
+            ImGui::EndGroup();
+            ImGui::SetCursorPos(after);
             ImGui::PopID();
         }
-        ImGui::EndListBox();
+        ImGui::EndChild();
+        chosen = &comps[static_cast<std::size_t>(savedChoice_)];
+        ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Confirm delete").x -
+                                3.0f * ImGui::GetStyle().FramePadding.x -
+                                ImGui::GetStyle().ItemSpacing.x);
+        ImGui::InputTextWithHint("##savedName", "Name this comp", savedNameBuffer_.data(),
+                                 savedNameBuffer_.size());
+        if (ImGui::IsItemDeactivatedAfterEdit() && store_->rename(*chosen, savedNameBuffer_.data()))
+            refreshAfterChange(state);
+        ImGui::SameLine();
+        // Two clicks: the first arms the button.
+        if (ImGui::Button(deleteArmed_ ? "Confirm delete" : "Delete")) {
+            if (deleteArmed_) {
+                store_->remove(*chosen);
+                deleteArmed_ = false;
+                refreshAfterChange(state);
+                chosen = nullptr;
+            } else {
+                deleteArmed_ = true;
+            }
+        }
+        ImGui::SetItemTooltip("Delete this saved comp");
+        ImGui::EndTable();
     }
-    ImGui::BeginDisabled(savedChoices_.empty());
-    if (ImGui::Button("Restore")) {
-        restore(client, savedChoices_[static_cast<std::size_t>(savedChoice_)]);
+
+    ImGui::BeginDisabled(chosen == nullptr);
+    if (ImGui::Button("Restore comp") && chosen != nullptr) {
+        restore(client, *chosen);
         restoreOffer_.reset();
         ImGui::CloseCurrentPopup();
     }
-    ImGui::SetItemTooltip("Replace the current takes with the chosen comp's takes and cuts");
+    ImGui::SetItemTooltip("Replace the current takes and cuts with the chosen comp");
+    ImGui::SameLine();
+    if (ImGui::Button("Restore takes only") && chosen != nullptr) {
+        if (const auto document = store_->load(*chosen))
+            if (const auto takes = takesOnly(*document))
+                client.send("import", {}, *takes);
+        compName_.clear();
+        nameBuffer_.fill('\0');
+        restoreOffer_.reset();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SetItemTooltip("Replace the current takes with these recordings and start a new comp "
+                          "(the first take throughout)");
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel"))
+    if (ImGui::Button("Close"))
         ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
+}
+
+std::string CompView::recordingTitle(const RecordingSet& set) const {
+    const auto it = recordingNames_.find(set.takesKey);
+    if (it != recordingNames_.end() && !it->second.empty())
+        return it->second;
+    return "Recorded " + formatTime(set.firstSaved);
+}
+
+void CompView::syncNameFields() {
+    deleteArmed_ = false;
+    recordingNameBuffer_.fill('\0');
+    savedNameBuffer_.fill('\0');
+    if (recordingSets_.empty())
+        return;
+    const RecordingSet& set = recordingSets_[static_cast<std::size_t>(savedSet_)];
+    if (const auto it = recordingNames_.find(set.takesKey); it != recordingNames_.end())
+        it->second.copy(recordingNameBuffer_.data(), recordingNameBuffer_.size() - 1);
+    set.comps[static_cast<std::size_t>(savedChoice_)].name.copy(savedNameBuffer_.data(),
+                                                                savedNameBuffer_.size() - 1);
+}
+
+void CompView::refreshAfterChange(const State& state) {
+    // Keep the selection where it was, as far as it still exists.
+    const int set = savedSet_;
+    const int choice = savedChoice_;
+    const std::string takesKey = recordingSets_.empty()
+                                     ? std::string{}
+                                     : recordingSets_[static_cast<std::size_t>(set)].takesKey;
+    refreshSavedChoices(state);
+    storeChanged_ = true;
+    const auto it = std::ranges::find(recordingSets_, takesKey, &RecordingSet::takesKey);
+    if (it != recordingSets_.end()) {
+        savedSet_ = static_cast<int>(it - recordingSets_.begin());
+        savedChoice_ = std::min(choice, static_cast<int>(it->comps.size()) - 1);
+    }
+    syncNameFields();
+}
+
+void CompView::refreshSavedChoices(const State& state) {
+    const auto& session = *state.session;
+    const auto best =
+        store_->offerFor(state.project, session.label, session.fingerprint, sessionId_);
+    std::vector<SavedComp> candidates;
+    for (const auto& comp : store_->list()) {
+        if (comp.project != state.project || comp.session == sessionId_)
+            continue;
+        const bool related = comp.clip == session.label ||
+                             (!comp.fingerprint.empty() && comp.fingerprint == session.fingerprint);
+        if (showAllClips_ || related || (best && comp.takesKey == best->takesKey))
+            candidates.push_back(comp);
+    }
+    recordingSets_ = groupByRecordings(candidates);
+    recordingNames_.clear();
+    for (const auto& set : recordingSets_)
+        recordingNames_[set.takesKey] = store_->recordingName(set.takesKey);
+    savedSet_ = 0;
+    savedChoice_ = 0;
+    // Select the best guess, and move its set to the top.
+    if (best) {
+        const auto set = std::ranges::find(recordingSets_, best->takesKey, &RecordingSet::takesKey);
+        if (set != recordingSets_.end()) {
+            std::rotate(recordingSets_.begin(), set, set + 1);
+            const auto& comps = recordingSets_.front().comps;
+            const auto it = std::ranges::find(comps, best->cutsKey, &SavedComp::cutsKey);
+            savedChoice_ = it == comps.end() ? 0 : static_cast<int>(it - comps.begin());
+        }
+    }
+    syncNameFields();
 }
 
 const SavedComp* CompView::savedFor(const State& state, const std::string& clip) const {

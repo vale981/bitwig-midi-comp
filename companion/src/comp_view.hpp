@@ -11,6 +11,7 @@
 #include <atomic>
 #include <filesystem>
 #include <imgui.h>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -86,6 +87,9 @@ class CompView {
         settings_ = settings;
         settingsPath_ = std::move(path);
     }
+
+    /** Opens the saved-comps list (for screenshots). */
+    void openSavedComps() { openSavedComps_ = true; }
 
     /** Returns a UI scale factor the user chose since the last call, if any. */
     [[nodiscard]] std::optional<float> takeUiScaleRequest() {
@@ -171,6 +175,14 @@ class CompView {
     void drawRestoreOffer(ApiClient& client);
     /** Draws the popup listing the project's saved comps, the best guess selected. */
     void drawSavedComps(ApiClient& client, const State& state);
+    /** Fills the saved-comps list for the session, the best guess selected. */
+    void refreshSavedChoices(const State& state);
+    /** Reloads the list after renaming or deleting, keeping the selection. */
+    void refreshAfterChange(const State& state);
+    /** Fills the name fields of the list from the selection. */
+    void syncNameFields();
+    /** Returns the name of a recording set, or when it was recorded. */
+    [[nodiscard]] std::string recordingTitle(const RecordingSet& set) const;
     /** Imports a saved comp into the session and adopts its name. */
     void restore(ApiClient& client, const SavedComp& comp);
     /** Saves the comp now (for example after renaming), in the background. */
@@ -187,10 +199,16 @@ class CompView {
     std::string demoKeyboard_;
     Settings* settings_ = nullptr;
     std::filesystem::path settingsPath_;
-    std::string compName_;                 ///< Name of the current session's comp.
-    std::array<char, 128> nameBuffer_{};   ///< Text field contents for :member:`compName_`.
-    std::vector<SavedComp> savedChoices_;  ///< The list shown by :meth:`drawSavedComps`.
-    int savedChoice_ = 0;
+    std::string compName_;                     ///< Name of the current session's comp.
+    std::array<char, 128> nameBuffer_{};       ///< Text field contents for :member:`compName_`.
+    std::vector<RecordingSet> recordingSets_;  ///< The list shown by :meth:`drawSavedComps`.
+    int savedSet_ = 0;                         ///< Selected recording set.
+    int savedChoice_ = 0;                      ///< Selected comp in that set.
+    bool showAllClips_ = false;
+    std::map<std::string, std::string> recordingNames_;  ///< takesKey to name.
+    std::array<char, 128> recordingNameBuffer_{};
+    std::array<char, 128> savedNameBuffer_{};
+    bool deleteArmed_ = false;     ///< "Delete" was clicked once.
     bool openSavedComps_ = false;  ///< Open the saved-comps popup on the next frame.
     float uiScale_ = 1.0f;
     std::optional<float> uiScaleRequest_;

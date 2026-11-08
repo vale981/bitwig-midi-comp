@@ -82,6 +82,7 @@ struct Options {
     std::optional<fs::path> screenshot;
     std::string demoKeyboard;
     std::optional<float> scale;
+    bool openSavedComps = false;
 };
 
 void printUsage() {
@@ -95,6 +96,7 @@ void printUsage() {
         "  --screenshot FILE  render for a few seconds, save the window as PPM and exit\n"
         "  --demo-keyboard NAME  show NAME as the keyboard without opening MIDI (screenshots)\n"
         "  --scale FACTOR     UI scale on top of the display's, instead of the saved setting\n"
+        "  --open-saved-comps open the list of saved comps (screenshots)\n"
         "\n"
         "Environment: MIDICOMP_FONT=path/to/font.ttf overrides the UI font.");
 }
@@ -114,6 +116,8 @@ std::optional<Options> parseArgs(const int argc, char** argv) {
             options.screenshot = argv[++i];
         } else if (arg == "--demo-keyboard" && hasValue) {
             options.demoKeyboard = argv[++i];
+        } else if (arg == "--open-saved-comps") {
+            options.openSavedComps = true;
         } else if (arg == "--scale" && hasValue) {
             const float value = std::strtof(argv[++i], nullptr);
             if (!(value >= 0.5f && value <= 4.0f)) {
@@ -355,6 +359,9 @@ int main(int argc, char** argv) {
             }
             if (watcher.changed())
                 applyTheme(watcher, view, scaling.ui());
+            if (options->openSavedComps &&
+                std::chrono::steady_clock::now() - started > std::chrono::seconds(1))
+                view.openSavedComps();
 
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();

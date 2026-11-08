@@ -20,6 +20,9 @@ struct SavedComp {
     std::int64_t savedAt = 0;  ///< Seconds since the Unix epoch.
     std::string fingerprint;   ///< Fingerprint of the comp's notes, see the extension's API.
     std::string name;          ///< Name given in the companion, or empty.
+    std::string takesKey;      ///< Identifies the recordings (all takes' notes).
+    std::string cutsKey;       ///< Identifies the cuts (segments) over those takes.
+    std::string cutsSummary;   ///< Which takes the cuts use, e.g. "takes 1, 3 · 4 cuts".
 
     /** Returns the name, or the clip label for an unnamed comp. */
     [[nodiscard]] const std::string& title() const { return name.empty() ? clip : name; }
@@ -29,8 +32,8 @@ struct SavedComp {
  * Local store of comps exported by the extension, so they survive restarts.
  *
  * Each comp session is saved to its own file, ``<project>__<clip>__<session>.json``, containing a
- * small header and the document from ``GET /api/v1/export``. Older files of the same clip are
- * pruned so that at most :member:`kKeepPerClip` remain.
+ * small header and the document from ``GET /api/v1/export``. Older unnamed files of the same
+ * clip are pruned so that at most :member:`kKeepPerClip` remain; named comps are kept.
  *
  * Methods may be called from different threads.
  */
@@ -106,12 +109,78 @@ class CompStore {
      */
     [[nodiscard]] std::optional<std::string> load(const SavedComp& comp) const;
 
+    /**
+     * Renames a saved comp.
+     *
+     * Args:
+     *     comp: an entry from :meth:`list`.
+     *     name: the new name; empty removes it.
+     *
+     * Returns:
+     *     Whether the file was rewritten.
+     */
+    bool rename(const SavedComp& comp, std::string_view name);
+
+    /**
+     * Deletes a saved comp.
+     *
+     * Args:
+     *     comp: an entry from :meth:`list`.
+     */
+    bool remove(const SavedComp& comp);
+
+    /** Returns the name given to a set of recordings, or an empty string. */
+    [[nodiscard]] std::string recordingName(std::string_view takesKey) const;
+
+    /**
+     * Names a set of recordings (kept in ``recordings.json``).
+     *
+     * Args:
+     *     takesKey: :member:`SavedComp::takesKey` of the set.
+     *     name: the name; empty removes it.
+     */
+    bool setRecordingName(std::string_view takesKey, std::string_view name);
+
   private:
     void prune(std::string_view project, std::string_view clip) const;
 
     std::filesystem::path dir_;
     mutable std::mutex mutex_;
 };
+
+/** Saved comps that share their recordings: the same takes, cut in different ways. */
+struct RecordingSet {
+    std::string takesKey;
+    std::vector<SavedComp> comps;  ///< One per distinct cut, newest first.
+    std::int64_t firstSaved = 0;   ///< When the first comp of these recordings was saved.
+
+    /** Returns the newest comp, which describes the set (clip, takes, time). */
+    [[nodiscard]] const SavedComp& newest() const { return comps.front(); }
+};
+
+/**
+ * Groups saved comps by their recordings. Saves of the same cut (autosaves, restores) collapse
+ * into one: the newest named one, else the newest.
+ *
+ * Args:
+ *     comps: saved comps, in any order.
+ *
+ * Returns:
+ *     The recording sets, newest first.
+ */
+std::vector<RecordingSet> groupByRecordings(const std::vector<SavedComp>& comps);
+
+/**
+ * Returns an export document with the cuts replaced by the first take over its whole length, to
+ * restore only the recordings of a saved comp.
+ *
+ * Args:
+ *     exportJson: a document from ``GET /api/v1/export``.
+ *
+ * Returns:
+ *     The changed document, or ``std::nullopt`` if it cannot be read.
+ */
+std::optional<std::string> takesOnly(std::string_view exportJson);
 
 /**
  * Turns text into a portable file name component.
