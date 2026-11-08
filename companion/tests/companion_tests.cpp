@@ -7,6 +7,8 @@
 #include "state.hpp"
 #include "theme.hpp"
 
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -321,6 +323,19 @@ void testRecordingSets() {
     CHECK(!takesOnly("not json").has_value());
 }
 
+void testPlayhead() {
+    auto playhead = parsePlayhead(R"({"playing":true,"step":1000,"stepsPerSecond":512.0})");
+    CHECK(playhead && playhead->playing && playhead->step == 1000);
+    const auto t0 = std::chrono::steady_clock::now();
+    playhead->at = t0;
+    CHECK(std::abs(playhead->stepAt(t0 + std::chrono::milliseconds(100)) - 1051.2) < 1e-6);
+    // Without updates the interpolation stops after a quarter second.
+    CHECK(std::abs(playhead->stepAt(t0 + std::chrono::seconds(5)) - 1128.0) < 1e-6);
+    playhead->playing = false;
+    CHECK(playhead->stepAt(t0 + std::chrono::seconds(1)) == 1000.0);
+    CHECK(!parsePlayhead("nope").has_value());
+}
+
 void testSettings() {
     const TempDir dir("settings");
     const fs::path file = dir.path / "settings.json";
@@ -382,6 +397,7 @@ int main() {
         {"preview", testPreview},
         {"settings", testSettings},
         {"recordings", testRecordingSets},
+        {"playhead", testPlayhead},
     };
     for (const auto& [name, test] : tests) {
         const int before = failures;

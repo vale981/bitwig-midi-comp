@@ -24,6 +24,7 @@ struct Palette {
     ImU32 clearFill = 0;  ///< Drag preview on the comp lane (clearing).
     ImU32 clearStroke = 0;
     ImU32 accent = 0;
+    ImU32 playhead = 0;  ///< Bitwig's timeline playhead.
     ImU32 live = 0;
     ImU32 warning = 0;
     ImU32 error = 0;

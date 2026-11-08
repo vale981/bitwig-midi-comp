@@ -122,6 +122,7 @@ Palette makePalette(const Theme& theme) {
     p.clearFill = u32(red.withAlpha(0.22f));
     p.clearStroke = u32(red);
     p.accent = u32(accent);
+    p.playhead = u32(theme.get({"Timeline Playhead"}, text));
     p.live = u32(theme.get({"Panel Green", "Panel Mint"}, kPanelColors[2].fallback));
     p.warning = u32(theme.get({"Panel Yellow", "Panel Orange"}, kPanelColors[6].fallback));
     p.error = u32(theme.get({"Error Text", "Panel Red", "Warning"}, kPanelColors[4].fallback)

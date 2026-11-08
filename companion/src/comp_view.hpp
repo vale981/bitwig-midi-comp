@@ -97,7 +97,9 @@ class CompView {
     }
 
     /** Returns whether an interaction is in progress and the UI should redraw continuously. */
-    [[nodiscard]] bool animating() const { return drag_.has_value() || redraw_; }
+    [[nodiscard]] bool animating() const {
+        return drag_.has_value() || redraw_ || playhead_.playing;
+    }
 
   private:
     /** A drag in progress on lane ``lane`` (take identifier, or ``-1`` for the comp lane). */
@@ -138,6 +140,9 @@ class CompView {
     void drawSessionStatus(const State& state);
     void drawLanes(ApiClient& client, const State& state);
     void drawRuler(ImDrawList* dl, const State& state, const Layout& layout, float y) const;
+    /** Draws the playhead over ``[y, y + height)``; ``marker`` adds the triangle on the ruler. */
+    void drawPlayhead(ImDrawList* dl, const State& state, const Layout& layout, float y,
+                      float height, bool marker) const;
     void drawGrid(ImDrawList* dl, const State& state, const Layout& layout, float y,
                   float height) const;
     void drawNotes(ImDrawList* dl, const std::vector<Note>& notes, const State& state,
@@ -241,6 +246,7 @@ class CompView {
     std::optional<float> requestedScrollX_;  ///< Scroll position to apply next frame.
     bool redraw_ = false;                    ///< Another frame is needed to settle the layout.
     bool inputBlocked_ = false;
+    Playhead playhead_;                      ///< Snapshot for the current frame.
     int renamingTake_ = -1;                  ///< Take whose name is being edited, or -1.
     bool renameFocus_ = false;               ///< Focus the name field on the next frame.
     std::array<char, 64> takeNameBuffer_{};  ///< A clip must be selected in Bitwig before editing.

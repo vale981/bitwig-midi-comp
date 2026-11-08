@@ -30,6 +30,33 @@ struct Endpoint {
     bool operator==(const Endpoint&) const = default;
 };
 
+/** The playhead in the session clip, from ``GET /api/v1/playhead``. */
+struct Playhead {
+    bool playing = false;
+    int step = -1;  ///< Step being played, or -1 outside the clip.
+    double stepsPerSecond = 0.0;
+    std::chrono::steady_clock::time_point at{};  ///< When it was received.
+
+    /**
+     * Returns the step at ``now``, interpolated while playing.
+     *
+     * Args:
+     *     now: the current time.
+     */
+    [[nodiscard]] double stepAt(std::chrono::steady_clock::time_point now) const;
+};
+
+/**
+ * Parses a playhead document.
+ *
+ * Args:
+ *     json: body of ``GET /api/v1/playhead``.
+ *
+ * Returns:
+ *     The playhead (without :member:`Playhead::at`), or ``std::nullopt`` if malformed.
+ */
+std::optional<Playhead> parsePlayhead(std::string_view json);
+
 /** Returns ``~/.midicomp/endpoint.json``. */
 std::filesystem::path defaultEndpointPath();
 
@@ -91,6 +118,17 @@ class ApiClient {
     /** Returns the reply to the most recent command, if any. */
     [[nodiscard]] std::optional<Reply> lastReply() const;
 
+    /** Returns the latest playhead. */
+    [[nodiscard]] Playhead playhead() const;
+
+    /**
+     * Turns polling of the playhead on or off (about 20 times a second while on).
+     *
+     * Args:
+     *     on: whether to poll, typically while a comp session runs.
+     */
+    void setPollPlayhead(bool on) { pollPlayhead_ = on; }
+
     /** Returns whether commands are queued or in flight. */
     [[nodiscard]] bool busy() const;
 
@@ -136,6 +174,7 @@ class ApiClient {
 
     void pollLoop();
     void commandLoop();
+    void playheadLoop();
     /** Waits for ``duration`` or until shutdown; returns whether the client is stopping. */
     bool sleepFor(std::chrono::milliseconds duration);
     std::optional<Endpoint> currentEndpoint();
@@ -155,10 +194,13 @@ class ApiClient {
     bool commandInFlight_ = false;
     std::condition_variable wake_;  ///< Signals new commands and shutdown.
     std::atomic<bool> stopping_{false};
+    std::atomic<bool> pollPlayhead_{false};
+    Playhead playhead_;                      ///< Guarded by ``mutex_``.
     httplib::Client* pollClient_ = nullptr;  ///< Guarded by ``mutex_``; stopped on shutdown.
 
     std::thread poller_;
     std::thread worker_;
+    std::thread playheadPoller_;
 };
 
 }  // namespace midicomp

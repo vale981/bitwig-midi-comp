@@ -146,6 +146,20 @@ in beats rounded to 1/960 beat. The session's value describes the clip when the 
 started; the export's describes the comp. A clip that holds a saved comp, such as a copy of the
 comp clip, has the fingerprint of that comp.
 
+### `GET /api/v1/playhead`
+
+The playhead in the session clip, kept out of the state because it changes many times a second
+(clients poll it, the companion about 20 times a second):
+
+```json
+{"playing": true, "step": 1834, "stepsPerSecond": 512.0}
+```
+
+`step` is the step being played in the session clip, or `-1` when the clip is not playing (or
+not under its cursor). While Bitwig records into a hidden arranger clip, it is derived from the
+transport position and the loop start in the clip measured at the last recording.
+`stepsPerSecond` lets clients interpolate between polls.
+
 ### `GET /api/v1/export`
 
 Returns the session's comp at full fidelity, for saving: every note attribute, the segments, and

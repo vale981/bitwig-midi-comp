@@ -76,6 +76,8 @@ if mode in ("recording", "select"):
     else:
         session.update(available=False, collecting=True)
 body = json.dumps(state).encode()
+playhead = json.dumps({"playing": False, "step": 4 * BAR + 160 if state["session"] else -1,
+                       "stepsPerSecond": SPB * 2.0}).encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -87,11 +89,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
             return
+        # A stopped playhead in bar 5, so screenshots show where it is drawn.
+        reply = playhead if self.path.startswith("/api/v1/playhead") else body
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(len(reply)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(reply)
 
     def do_POST(self):
         reply = json.dumps({"ok": True, "message": "ok"}).encode()

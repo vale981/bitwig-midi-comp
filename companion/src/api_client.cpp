@@ -1,5 +1,6 @@
 #include "api_client.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -18,6 +19,26 @@ httplib::Headers authHeaders(const Endpoint& endpoint) {
 }
 
 }  // namespace
+
+double Playhead::stepAt(const std::chrono::steady_clock::time_point now) const {
+    if (!playing || step < 0)
+        return step;
+    const double elapsed = std::chrono::duration<double>(now - at).count();
+    // Beyond a few updates without news the transport has likely stopped; do not run away.
+    return step + std::clamp(elapsed, 0.0, 0.25) * stepsPerSecond;
+}
+
+std::optional<Playhead> parsePlayhead(const std::string_view json) {
+    try {
+        const auto j = nlohmann::json::parse(json);
+        return Playhead{.playing = j.value("playing", false),
+                        .step = j.value("step", -1),
+                        .stepsPerSecond = j.value("stepsPerSecond", 0.0),
+                        .at = {}};
+    } catch (const nlohmann::json::exception&) {
+        return std::nullopt;
+    }
+}
 
 std::filesystem::path defaultEndpointPath() {
 #ifdef _WIN32
@@ -70,6 +91,7 @@ ApiClient::ApiClient(std::filesystem::path endpointPath, std::function<void()> o
     : endpointPath_(std::move(endpointPath)), onChange_(std::move(onChange)) {
     poller_ = std::thread([this] { pollLoop(); });
     worker_ = std::thread([this] { commandLoop(); });
+    playheadPoller_ = std::thread([this] { playheadLoop(); });
 }
 
 ApiClient::~ApiClient() {
@@ -83,6 +105,7 @@ ApiClient::~ApiClient() {
     wake_.notify_all();
     poller_.join();
     worker_.join();
+    playheadPoller_.join();
 }
 
 bool ApiClient::sleepFor(const std::chrono::milliseconds duration) {
@@ -108,6 +131,50 @@ std::string ApiClient::connectionDetail() const {
 std::optional<Reply> ApiClient::lastReply() const {
     const std::scoped_lock lock(mutex_);
     return lastReply_;
+}
+
+Playhead ApiClient::playhead() const {
+    const std::scoped_lock lock(mutex_);
+    return playhead_;
+}
+
+void ApiClient::playheadLoop() {
+    using namespace std::chrono_literals;
+    std::optional<Endpoint> current;
+    std::unique_ptr<httplib::Client> client;
+    while (!stopping_) {
+        std::optional<Endpoint> endpoint;
+        {
+            const std::scoped_lock lock(mutex_);
+            endpoint = endpoint_;
+        }
+        if (!pollPlayhead_ || !endpoint) {
+            sleepFor(200ms);
+            continue;
+        }
+        if (endpoint != current) {
+            client = std::make_unique<httplib::Client>(endpoint->url);
+            client->set_connection_timeout(1, 0);
+            client->set_read_timeout(1, 0);
+            current = endpoint;
+        }
+        const auto result = client->Get("/api/v1/playhead", authHeaders(*endpoint));
+        if (result && result->status == 200) {
+            if (auto parsed = parsePlayhead(result->body)) {
+                parsed->at = std::chrono::steady_clock::now();
+                bool changed = false;
+                {
+                    const std::scoped_lock lock(mutex_);
+                    changed =
+                        parsed->playing || playhead_.playing || parsed->step != playhead_.step;
+                    playhead_ = *parsed;
+                }
+                if (changed)
+                    notify();
+            }
+        }
+        sleepFor(50ms);
+    }
 }
 
 bool ApiClient::busy() const {

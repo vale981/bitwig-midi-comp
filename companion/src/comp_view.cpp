@@ -67,6 +67,9 @@ void CompView::draw(ApiClient& client) {
     const State* state = statePtr.get();
     updateStore(client, state);
     forwardMidi(client, state);
+    const bool comping = state != nullptr && state->session.has_value();
+    client.setPollPlayhead(comping);
+    playhead_ = comping ? client.playhead() : Playhead{};
     handleScaleKeys();
 
     drawToolbar(client, state);
@@ -777,6 +780,7 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
         drawGrid(dl, state, layout, rulerHeight, compHeight);
         drawSegments(dl, state, layout, rulerHeight, compHeight, -1);
         drawNotes(dl, state.comp, state, layout, rulerHeight, compHeight, -1);
+        drawPlayhead(dl, state, layout, 0.0f, topHeight, true);
         handleLaneInput(client, state, layout, -1, rulerHeight, compHeight);
 
         const float hx = layout.origin.x + layout.visibleLeft - headerWidth;
@@ -837,6 +841,7 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
                 palette_.laneSeparator);
             y += takeHeight;
         }
+        drawPlayhead(dl, state, layout, 0.0f, y, false);
         y = 0.0f;
         for (const auto& take : state.takes) {
             drawTakeHeader(client, state, take, y, takeHeight);
@@ -856,6 +861,25 @@ void CompView::drawLanes(ApiClient& client, const State& state) {
     }
     ImGui::EndChild();
     drawHints(state);
+}
+
+void CompView::drawPlayhead(ImDrawList* dl, const State& state, const Layout& layout, const float y,
+                            const float height, const bool marker) const {
+    const double step = playhead_.stepAt(std::chrono::steady_clock::now());
+    if (step < 0.0 || step > static_cast<double>(state.length))
+        return;
+    const float x =
+        layout.origin.x + layout.headerWidth + static_cast<float>(step) * layout.pxPerStep;
+    if (x < layout.origin.x + layout.visibleLeft || x > layout.origin.x + layout.visibleRight)
+        return;
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    const float top = layout.origin.y + y;
+    dl->AddLine(ImVec2(x, top), ImVec2(x, top + height), palette_.playhead, 1.5f * scale);
+    if (marker) {
+        const float w = 5.0f * scale;
+        dl->AddTriangleFilled(ImVec2(x - w, top), ImVec2(x + w, top), ImVec2(x, top + w * 1.4f),
+                              palette_.playhead);
+    }
 }
 
 void CompView::drawHints(const State& state) const {

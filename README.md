@@ -58,7 +58,8 @@ Two parts:
    ![Passes 4 and 5 being recorded](docs/screenshots/recording.png)
 
 3. **Comp.** Drag across a take lane to use that take for the range (snapped to the *Snap* grid);
-   drag across the comp lane to make a range silent. The clip is rewritten as you edit. Each new
+   drag across the comp lane to make a range silent. The clip is rewritten as you edit, and a
+   line shows the playhead while Bitwig plays the clip. Each new
    pass is added as a lane. While the comp still uses a single take throughout, it switches to the
    new pass, as with Bitwig's audio takes; once takes are cut together, the comp stays as it is.
 

@@ -50,6 +50,7 @@ final class CompServer
    private static final int MAX_BODY_BYTES = 64 * 1024 * 1024;
    /** Read-only commands answered on the controller thread but requested with GET. */
    private static final Set<String> GET_COMMANDS = Set.of("export");
+   private volatile String playhead = "{\"playing\":false,\"step\":-1,\"stepsPerSecond\":0}";
 
    private final HttpServer server;
    private final ExecutorService executor;
@@ -143,6 +144,18 @@ final class CompServer
     *    json: the state document.
     *    newVersion: version number contained in ``json``.
     */
+   /**
+    * Replaces the document served at ``/api/v1/playhead``. It changes many times a second, so it
+    * is kept out of the state (whose version clients wait on).
+    *
+    * Args:
+    *    json: the playhead document.
+    */
+   void publishPlayhead(final String json)
+   {
+      playhead = json;
+   }
+
    void publish(final String json, final long newVersion)
    {
       synchronized (stateLock)
@@ -201,6 +214,8 @@ final class CompServer
 
       if (method.equals("GET") && op.equals("info"))
          send(exchange, 200, info);
+      else if (method.equals("GET") && op.equals("playhead"))
+         send(exchange, 200, playhead);
       else if (method.equals("GET") && op.equals("state"))
          serveState(exchange, params);
       else if (method.equals("GET") && GET_COMMANDS.contains(op))

@@ -272,6 +272,7 @@ public class MidiCompExtension extends ControllerExtension
       targetCursor.clipLauncherSlot().name().addValueObserver(v -> markDirty());
       targetCursor.clipLauncherSlot().sceneIndex().addValueObserver(v -> identityChanged(target));
       targetCursor.clipLauncherSlot().isRecording().addValueObserver(v -> markDirty());
+      targetCursor.playingStep().markInterested();
    }
 
    private void initArrangerCursor()
@@ -386,6 +387,8 @@ public class MidiCompExtension extends ControllerExtension
       tickVersion();
       tickSession();
       updatePreview();
+      if (server != null)
+         server.publishPlayhead(playheadJson());
 
       if (stateDirty && server != null)
       {
@@ -1198,6 +1201,35 @@ public class MidiCompExtension extends ControllerExtension
          preview = List.copyOf(next);
          markDirty();
       }
+   }
+
+   /**
+    * Returns the playhead in the session clip: whether the transport plays, the step being
+    * played (or -1), and steps per second for interpolating between updates. The step comes
+    * from the clip itself; while Bitwig records into a hidden arranger clip, from the transport
+    * position and the loop start in the clip measured at the last assembly.
+    */
+   private String playheadJson()
+   {
+      final boolean playing = transport.isPlaying().get();
+      int step = -1;
+      if (live.link() != null)
+      {
+         if (sessionAvailable())
+            step = sessionClip().clip().playingStep().get();
+         if (step < 0 && live.link().source() == Take.Source.ARRANGER && isRecording()
+            && !Double.isNaN(lastPosition))
+         {
+            final double loopBeats = transport.arrangerLoopDuration().get();
+            final double inLoop =
+               LoopTakes.wrap(lastPosition - transport.arrangerLoopStart().get(), loopBeats);
+            step = (int) Math.round((Math.round(previewOffsetBeats * 4) / 4.0 + inLoop) / stepSize);
+         }
+      }
+      final double stepsPerSecond = transport.tempo().value().getRaw() / 60.0 / stepSize;
+      return String.format(java.util.Locale.ROOT,
+         "{\"playing\":%b,\"step\":%d,\"stepsPerSecond\":%.3f}", playing && step >= 0, step,
+         stepsPerSecond);
    }
 
    private void endPreview()

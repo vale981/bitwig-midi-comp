@@ -271,7 +271,9 @@ int main(int argc, char** argv) {
 
     Scaling scaling;
     measureDisplay(window, scaling);
-    midicomp::Settings settings = midicomp::loadSettings(settingsPath());
+    // Screenshots use the defaults, not this machine's preferences.
+    midicomp::Settings settings =
+        options->screenshot ? midicomp::Settings{} : midicomp::loadSettings(settingsPath());
     scaling.user = options->scale.value_or(settings.uiScale);
     glfwSetWindowContentScaleCallback(window, [](GLFWwindow*, float, float) {
         displayScaleChanged = true;
@@ -286,7 +288,8 @@ int main(int argc, char** argv) {
         ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse;
 
     midicomp::CompView view;
-    view.setSettings(&settings, settingsPath());
+    view.setSettings(&settings, options->screenshot ? fs::path(options->storeDir / "settings.json")
+                                                    : settingsPath());
     midicomp::CompStore store(options->storeDir);
     view.setStore(&store);
     // Rendered screenshots should not depend on the connected devices.
