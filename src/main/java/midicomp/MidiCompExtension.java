@@ -183,6 +183,11 @@ public class MidiCompExtension extends ControllerExtension
    private final ArrayDeque<List<ControlEvent>> passControls = new ArrayDeque<>();
    /** After a MIDI file replaced the session clip: rewrite the notes from this time on. */
    private long rewriteAfterLoadAt;
+   /** Re-pinning the session cursor to a replaced launcher clip: when, which scene, which step. */
+   private long repinAt;
+   private int repinScene;
+   private int repinStep;
+   private long lastRepin;
    /** A comp to import once the next session has started. */
    private String carryAfterStart;
 
@@ -1384,8 +1389,13 @@ public class MidiCompExtension extends ControllerExtension
       if (launcher)
       {
          targetCursor.clipLauncherSlot().replaceInsertionPoint().insertFile(file.toString());
-         // MIDI files cannot hold timbre, chance and other note values: rewrite the notes once
-         // the file is in.
+         // The pinned cursor stays with the replaced clip: select the slot's new clip and pin it
+         // again (through the load bank, whose slots stay put), then rewrite the notes, as MIDI
+         // files cannot hold timbre, chance and other note values.
+         loadBank.scrollPosition().set(live.link().trackPosition());
+         repinScene = live.link().sceneIndex();
+         repinStep = 0;
+         repinAt = System.nanoTime() + 900_000_000L;
          rewriteAfterLoadAt = System.nanoTime() + 1_500_000_000L;
          log("Loaded " + file + " into " + live.link().label());
          return Result.ok("Loaded the comp into " + live.link().label());
@@ -1552,9 +1562,10 @@ public class MidiCompExtension extends ControllerExtension
          || launcherPlay != null || isRecording())
          return;
       syncedRevision = revision;
-      final ClipLauncherSlot slot = targetCursor.clipLauncherSlot();
-      final boolean playing = slot.isPlaying().get();
+      final boolean playing = targetCursor.clipLauncherSlot().isPlaying().get();
       final Result loaded = loadIntoBitwig();
+      final ClipLauncherSlot slot =
+         loadBank.getItemAt(0).clipLauncherSlotBank().getItemAt(synced.sceneIndex());
       log("Comp changed: " + loaded.message() + (playing ? "; relaunching at the next loop start"
          : ""));
       if (loaded.ok() && playing)
@@ -1613,6 +1624,39 @@ public class MidiCompExtension extends ControllerExtension
    private void tickLoad()
    {
       final long now = System.nanoTime();
+      // A launcher session whose clip was replaced: follow it again once its slot is selected.
+      if (repinAt == 0 && live.link() != null && live.link().source() == Take.Source.LAUNCHER
+         && !sessionAvailable() && now - lastRepin > 1_000_000_000L)
+      {
+         final ClipRef selected = launcherRef();
+         if (selected != null && selected.trackPosition() == live.link().trackPosition()
+            && selected.sceneIndex() == live.link().sceneIndex())
+         {
+            lastRepin = now;
+            pinTargetToSelection();
+            log("Following " + live.link().label() + " again");
+         }
+      }
+      if (repinAt != 0 && now > repinAt)
+      {
+         final Track track = loadBank.getItemAt(0);
+         if (live.link() == null || repinScene >= LOAD_SCENES)
+            repinAt = 0;
+         else if (track.position().get() != live.link().trackPosition())
+            repinAt = now + 200_000_000L; // the bank is still scrolling
+         else if (repinStep == 0)
+         {
+            track.clipLauncherSlotBank().getItemAt(repinScene).select();
+            repinStep = 1;
+            repinAt = now + 400_000_000L;
+         }
+         else
+         {
+            pinTargetToSelection();
+            repinAt = 0;
+            log("Following the reloaded clip again");
+         }
+      }
       if (rewriteAfterLoadAt != 0 && now > rewriteAfterLoadAt && live.link() != null
          && sessionAvailable() && sessionClip().isSettled(LiveSync.SETTLE_MILLIS))
       {

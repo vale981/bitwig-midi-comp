@@ -128,9 +128,14 @@ void CompView::drawSelectOverlay(const State& state, const ImVec2 origin, const 
     ImFont* font = ImGui::GetFont();
     const float fontSize = ImGui::GetFontSize();
     const std::string track = session.track.empty() ? "comp" : "\"" + session.track + "\"";
-    const std::string title = "Click a clip on the " + track + " track in Bitwig";
+    const bool launcher = session.source == "launcher";
+    const std::string title =
+        launcher ? "Select the comp clip in the launcher of the " + track + " track"
+                 : "Click a clip on the " + track + " track in Bitwig";
     const char* reason =
-        session.collecting
+        launcher ? "MIDI Comp lost track of the clip (it was replaced or moved). Selecting it "
+                   "resumes editing."
+        : session.collecting
             ? "The recording is ready. MIDI Comp can read it only from the selected clip."
         : session.pending
             ? "Comp changes are waiting. Bitwig lets extensions edit only the selected arranger "
