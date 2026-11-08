@@ -56,6 +56,7 @@ struct Session {
     std::string track;        ///< Name of the comp clip's track.
     std::vector<PreviewPass> preview;  ///< Provisional takes of the current recording.
     std::string fingerprint;           ///< The clip's content when the session started.
+    bool fromArranger = false;         ///< The session runs in a launcher copy (Play in launcher).
 };
 
 /** Snapshot of the extension state, see ``API.md``. */

@@ -172,6 +172,17 @@ public class MidiCompExtension extends ControllerExtension
    }
 
    private SyncedClip syncedClip;
+
+   /**
+    * Where the synced launcher clip came from, for :meth:`backToArranger`: the arranger comp
+    * clip, its full comp (export document) and the loop region's place in it, in beats.
+    */
+   private record LauncherOrigin(ClipRef arranger, String fullComp, double fromBeats,
+      double lengthBeats)
+   {
+   }
+
+   private LauncherOrigin launcherOrigin;
    private long syncedRevision;
    private long seenRevision;
    private long revisionChangedAt;
@@ -497,7 +508,8 @@ public class MidiCompExtension extends ControllerExtension
             isRecording() ? playedWraps + 1 : 0,
             capture.isPending() && !sessionAvailable(),
             preview,
-            sessionFingerprint);
+            sessionFingerprint,
+            launcherOrigin != null && syncedClip != null);
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
          session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
@@ -534,6 +546,7 @@ public class MidiCompExtension extends ControllerExtension
          case "transport" -> transportAction(p.getOrDefault("action", ""));
          case "loadIntoBitwig" -> loadIntoBitwig();
          case "playInLauncher" -> playInLauncher();
+         case "backToArranger" -> backToArranger();
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -1440,6 +1453,8 @@ public class MidiCompExtension extends ControllerExtension
       pendingLoad = file.toString();
       pendingLoadAt = System.nanoTime();
       launcherPlay = new LauncherPlay(comp, 0, loopBeats);
+      launcherOrigin = new LauncherOrigin(live.link(),
+         CompExport.write(model, live.link(), project.get(), stepSize), from * stepSize, loopBeats);
       log(String.format("Playing in the launcher: the loop region (from clip beat %.3f, %.3f "
          + "beats) as its own clip", Math.max(0, loopStartInClip), loopBeats));
       return Result.ok("Setting up the comp in the launcher");
@@ -1527,6 +1542,54 @@ public class MidiCompExtension extends ControllerExtension
             play.at = now + 20_000_000L;
          }
       }
+   }
+
+   /**
+    * Returns from :meth:`playInLauncher` to the arranger: merges the launcher session's cuts back
+    * into the full comp, returns the comp track to the arrangement and continues the session in
+    * the arranger clip, which gets the merged comp.
+    */
+   private Result backToArranger()
+   {
+      final LauncherOrigin origin = launcherOrigin;
+      if (origin == null || syncedClip == null || live.link() == null
+         || live.link().source() != Take.Source.LAUNCHER)
+         return Result.fail("Back to arranger works for a comp played in the launcher");
+      final ClipRef arrangerClip = arrangerRef();
+      if (arrangerClip == null || arrangerClip.trackPosition() != origin.arranger().trackPosition())
+         return Result.fail("Select the comp clip on the " + origin.arranger().trackName()
+            + " track in the arranger first");
+
+      final CompExport.Imported full;
+      try
+      {
+         full = CompExport.read(origin.fullComp(), stepSize);
+      }
+      catch (final RuntimeException e)
+      {
+         return Result.fail("Could not read the arranger comp: " + e.getMessage());
+      }
+      final int from = (int) Math.round(origin.fromBeats() / stepSize);
+      final int length = (int) Math.round(origin.lengthBeats() / stepSize);
+      if (full.takes().size() != model.takes().size())
+         log(String.format("Back to arranger: the arranger comp has %d takes, the launcher comp "
+            + "%d; takes are matched in order", full.takes().size(), model.takes().size()));
+      final CompModel merged = CompModel.mergeRegion(full, model, from, length);
+
+      final Track track = loadBank.getItemAt(0);
+      if (track.position().get() == origin.arranger().trackPosition())
+         track.returnToArrangement();
+      else
+         log("Back to arranger: use Back to arrangement in Bitwig for the comp track");
+      syncedClip = null;
+      launcherOrigin = null;
+      launcherPlay = null;
+      carryAfterStart = CompExport.write(merged, origin.arranger(), project.get(), stepSize);
+      final Result started = startSession("arranger");
+      if (!started.ok())
+         carryAfterStart = null;
+      log("Back to arranger: " + started.message());
+      return started;
    }
 
    /**

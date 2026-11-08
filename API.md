@@ -84,7 +84,8 @@ State document:
     "preview": [                    // provisional takes while recording (arranger), from the
       {"pass": 1, "notes": [...]}   // keyboard notes; replaced by the takes once assembled
     ],
-    "fingerprint": "3f2a9c01d4e5b677"  // the clip's notes when the session started, see below
+    "fingerprint": "3f2a9c01d4e5b677", // the clip's notes when the session started, see below
+    "fromArranger": false           // a launcher copy made by playInLauncher (backToArranger)
   },
   "log": ["14:02:11  Loop wrapped (position 15.98 -> 0.02, step 2046 -> 2)", ...],
   "takes": [
@@ -114,6 +115,7 @@ Bitwig did not process the command within 5 s.
 | `stopRecording` |                          | Stop the transport and arranger recording. |
 | `loadIntoBitwig` |                       | Write the comp, notes and control messages, as a MIDI file (`~/.midicomp/midi/<title>.mid`) and load it: into the session clip's slot for launcher clips (the notes are written again afterwards, as MIDI files lack per-note values like timbre), else into the first free launcher slot of the comp track. |
 | `playInLauncher` |                       | Arranger sessions with the arranger loop on: load the part of the comp inside the arranger loop region into a free launcher slot as a clip one loop long (launch quantization one bar), continue the session in that clip with the takes and segments cropped the same way, and launch it in the loop's last bar, so it plays in sync with the arrangement. |
+| `backToArranger` |                       | From a launcher copy made by `playInLauncher`: merge its segments (and take names) back into the full arranger comp, return the comp track to the arrangement and continue the session in the selected arranger clip of that track. |
 | `transport`  | `action=play\|stop\|toggle` | Start or stop Bitwig's transport. |
 | `seek`       | `step`                      | Arranger sessions: move the playhead to a step of the session clip (sets the play start, and jumps there while playing). Needs the clip's position in the arrangement, which the extension learns while the clip plays. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |

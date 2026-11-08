@@ -133,4 +133,30 @@ class ControlsTest
       assertEquals(0, loop.segments().get(0).from());
       assertEquals(512, loop.segments().get(0).to());
    }
+
+   @Test
+   void editsOfTheLoopRegionMergeBackIntoTheFullComp()
+   {
+      final CompModel full = new CompModel();
+      final Take a = full.addTake("Pass 1", Take.Source.ARRANGER, 1024, List.of(), List.of());
+      final Take b = full.addTake("Pass 2", Take.Source.ARRANGER, 1024, List.of(), List.of());
+      full.assign(0, 1024, a.id());
+      final String exported = CompExport.write(full,
+         new ClipRef(Take.Source.ARRANGER, 0, "Keys", -1, "Keys (arranger)"), "Song", 1.0 / 128);
+
+      // Loop region 256..768, edited in the launcher: pass 2 for 128..384, take renamed.
+      final CompModel region = full.cropped(256, 512, 1.0 / 128);
+      region.assign(128, 384, region.takes().get(1).id());
+      region.renameTake(region.takes().get(1).id(), "Chorus");
+
+      final CompModel merged = CompModel.mergeRegion(CompExport.read(exported, 1.0 / 128), region,
+         256, 512);
+      assertEquals("Chorus", merged.takes().get(1).name());
+      final int first = merged.takes().get(0).id();
+      final int second = merged.takes().get(1).id();
+      assertEquals(List.of(new CompModel.Segment(0, 384, first),
+         new CompModel.Segment(384, 640, second), new CompModel.Segment(640, 1024, first)),
+         merged.segments());
+      assertTrue(b.id() > 0);
+   }
 }

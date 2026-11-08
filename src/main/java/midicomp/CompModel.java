@@ -329,6 +329,71 @@ final class CompModel
       return result;
    }
 
+   /**
+    * Merges a comp of a region back into the full comp it was cropped from (see :meth:`cropped`):
+    * segments outside the region stay, those inside come from ``region`` (moved by ``from``).
+    * Takes correspond by position; their names come from ``region``, and takes ``region`` has
+    * beyond the full comp's are added, moved by ``from``.
+    *
+    * Args:
+    *    full: takes and segments of the full comp, as from :meth:`CompExport.read`.
+    *    region: the edited region comp.
+    *    from: first step of the region in the full comp.
+    *    length: length of the region in steps.
+    *
+    * Returns:
+    *    The merged comp.
+    */
+   static CompModel mergeRegion(
+      final CompExport.Imported full,
+      final CompModel region,
+      final int from,
+      final int length)
+   {
+      final List<Take> merged = new ArrayList<>();
+      final List<Take> regionTakes = region.takes();
+      final int fullLength = full.takes().stream().mapToInt(Take::length).max().orElse(0);
+      for (int i = 0; i < Math.max(full.takes().size(), regionTakes.size()); i++)
+      {
+         if (i < full.takes().size())
+         {
+            final Take t = full.takes().get(i);
+            final String name = i < regionTakes.size() ? regionTakes.get(i).name() : t.name();
+            merged.add(new Take(t.id(), name, t.source(), t.length(), t.notes(), t.controls()));
+            continue;
+         }
+         final Take t = regionTakes.get(i);
+         final List<NoteData> notes = new ArrayList<>();
+         for (final NoteData n : t.notes())
+            notes.add(n.withX(n.x() + from));
+         final List<ControlEvent> controls = new ArrayList<>();
+         for (final ControlEvent c : t.controls())
+            controls.add(c.at(c.x() + from));
+         merged.add(new Take(t.id(), t.name(), t.source(), Math.max(fullLength, from + t.length()),
+            notes, controls));
+      }
+
+      final int to = from + length;
+      final List<int[]> segments = new ArrayList<>();
+      for (final int[] s : full.segments())
+      {
+         if (s[0] < from)
+            segments.add(new int[] { s[0], Math.min(s[1], from), s[2] });
+         if (s[1] > to)
+            segments.add(new int[] { Math.max(s[0], to), s[1], s[2] });
+      }
+      for (final Segment s : region.segments())
+      {
+         final int index = region.takes().indexOf(region.take(s.takeId()));
+         if (index >= 0)
+            segments.add(new int[] { s.from() + from, Math.min(s.to(), length) + from, index });
+      }
+      segments.removeIf(s -> s[1] <= s[0]);
+      final CompModel result = new CompModel();
+      result.restore(merged, segments);
+      return result;
+   }
+
    /** Removes all takes and segments. */
    void clear()
    {

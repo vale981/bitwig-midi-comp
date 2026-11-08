@@ -59,13 +59,14 @@ Two parts:
 
 3. **Comp.** Drag across a take lane to use that take for the range (snapped to the *Snap* grid);
    drag across the comp lane to make a range silent. The clip is rewritten as you edit, and a
-   line shows the playhead. For arranger clips, click the ruler to move it (snapped to the
-   grid, `Shift` for any position); this works once the clip has played, so the companion knows
-   where the clip starts. Each new
-   pass is added as a lane. While the comp still uses a single take throughout, it switches to the
-   new pass, as with Bitwig's audio takes; once takes are cut together, the comp stays as it is.
+   line shows the playhead. For arranger clips, click the ruler to move it (snapped to the grid,
+   `Shift` for any position); this works once the clip has played, so the companion knows where
+   the clip starts. Each new pass is added as a lane. While the comp still uses a single take
+   throughout, it switches to the new pass, as with Bitwig's audio takes; once takes are cut
+   together, the comp stays as it is.
 
-4. **Finish.** *Done* ends the session; the clip keeps the comp.
+4. **Finish.** *Done* ends the session; the clip keeps the comp. *Revert* restores the clip as it
+   was before the session and ends it.
 
    The editor writes notes only; the extension API cannot write CC into clips. Control messages
    played while recording (CC such as the hi-hat pedal or sustain, channel pressure, pitch bend)
@@ -84,9 +85,10 @@ Two parts:
    launches it in the last bar of the arranger loop, so it comes in at the next loop start and
    wraps with the arranger. Edits then go to the launcher clip, and about a second after the last
    edit the comp is loaded into it again as a file, so the automation follows the comp; if the
-   clip was playing, it is relaunched at the next loop start. When the comp is done, copy the clip into the arranger at the loop
-   start and use *Back to arrangement* in Bitwig. *Revert* restores the clip as it
-   was before the session and ends it.
+   clip was playing, it is relaunched at the next loop start. *Back to arranger* returns the
+   track to the arrangement and continues the session in the arranger clip (select it first),
+   with the edits made in the launcher merged into the full comp. For its CC automation, copy a
+   clip loaded with *Load into Bitwig* over it.
 
 Takes recorded elsewhere (another track or launcher slot) can be added with *Add take*, which
 copies the selected clip's notes. They must start at the same position as the comp clip. A take is

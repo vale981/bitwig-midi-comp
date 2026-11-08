@@ -43,6 +43,7 @@ final class StateJson
     *    collecting: whether a recording waits for the clip to be selected to become takes.
     *    preview: provisional takes of the current recording, from the keyboard notes.
     *    fingerprint: fingerprint of the clip's content when the session started.
+    *    fromArranger: whether the session runs in a launcher copy made by "Play in launcher".
     */
    record SessionStatus(
       ClipRef clip,
@@ -56,7 +57,8 @@ final class StateJson
       int recordingPass,
       boolean collecting,
       List<PreviewPass> preview,
-      String fingerprint)
+      String fingerprint,
+      boolean fromArranger)
    {
    }
 
@@ -128,6 +130,7 @@ final class StateJson
             .append(",\"collecting\":").append(session.collecting())
             .append(",\"track\":").append(Json.quote(session.clip().trackName()))
             .append(",\"fingerprint\":").append(Json.quote(session.fingerprint()))
+            .append(",\"fromArranger\":").append(session.fromArranger())
             .append(",\"preview\":[");
       if (session != null)
       {
