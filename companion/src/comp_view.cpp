@@ -342,10 +342,10 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
                 client.send("playInLauncher");
             ImGui::SetItemTooltip(
                 "Play the comp from the clip launcher while the other tracks play the arrangement:"
-                "\nloads it into a free launcher slot, loops it over the arranger loop region, "
-                "continues\nthe session there and launches it at the next loop start. Edits then "
-                "go to that clip;\ncopy it over the arranger clip when done. Its automation is "
-                "updated with Load into Bitwig.");
+                "\nloads the loop region as its own launcher clip, continues the session there "
+                "and launches it\nat the next loop start. Edits then go to that clip; copy it "
+                "into the arranger at the loop start\nwhen done. Its automation is updated with "
+                "Load into Bitwig.");
         }
         ImGui::EndDisabled();
     }

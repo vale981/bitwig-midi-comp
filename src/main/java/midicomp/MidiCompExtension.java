@@ -1396,13 +1396,26 @@ public class MidiCompExtension extends ControllerExtension
       final double clipStart = arrangerClipStart();
       final double loopStartInClip = !Double.isNaN(clipStart)
          ? transport.arrangerLoopStart().get() - clipStart : Math.round(previewOffsetBeats * 4) / 4.0;
-      final String comp = CompExport.write(model, live.link(), project.get(), stepSize);
-      final Result loading = loadIntoBitwig();
-      if (!loading.ok())
-         return loading;
-      launcherPlay = new LauncherPlay(comp, Math.max(0, loopStartInClip), loopBeats);
-      log(String.format("Playing in the launcher: clip loop from beat %.3f, %.3f beats",
-         launcherPlay.loopStartInClip, loopBeats));
+      // The launcher clip holds just the loop region, from 0: notes, automation and the clip's
+      // own loop then line up without further settings (the API cannot set automation loops).
+      final int from = (int) Math.round(Math.max(0, loopStartInClip) / stepSize);
+      final CompModel loop = model.cropped(from, (int) Math.round(loopBeats / stepSize), stepSize);
+      final String comp = CompExport.write(loop, live.link(), project.get(), stepSize);
+      final java.nio.file.Path file;
+      try
+      {
+         file = writeMidiFile(live.link().trackName() + " loop comp", loop);
+      }
+      catch (final java.io.IOException e)
+      {
+         return Result.fail("Could not write the MIDI file: " + e.getMessage());
+      }
+      loadBank.scrollPosition().set(live.link().trackPosition());
+      pendingLoad = file.toString();
+      pendingLoadAt = System.nanoTime();
+      launcherPlay = new LauncherPlay(comp, 0, loopBeats);
+      log(String.format("Playing in the launcher: the loop region (from clip beat %.3f, %.3f "
+         + "beats) as its own clip", Math.max(0, loopStartInClip), loopBeats));
       return Result.ok("Setting up the comp in the launcher");
    }
 
@@ -1505,16 +1518,23 @@ public class MidiCompExtension extends ControllerExtension
    /** Writes the comp to ``~/.midicomp/midi/<title>.mid`` and returns the path. */
    private java.nio.file.Path writeMidiFile(final String title) throws java.io.IOException
    {
+      return writeMidiFile(title, model);
+   }
+
+   /** Writes a comp as ``~/.midicomp/midi/<title>.mid`` and returns the path. */
+   private java.nio.file.Path writeMidiFile(final String title, final CompModel comp)
+      throws java.io.IOException
+   {
       final java.nio.file.Path dir =
          java.nio.file.Path.of(System.getProperty("user.home"), ".midicomp", "midi");
       java.nio.file.Files.createDirectories(dir);
       final String safe = title.replaceAll("[^A-Za-z0-9 _.-]", "_").strip();
       final java.nio.file.Path file = dir.resolve((safe.isEmpty() ? "Comp" : safe) + ".mid");
       final List<NoteData> notes = new ArrayList<>();
-      for (final CompModel.CompNote n : model.render(stepSize))
+      for (final CompModel.CompNote n : comp.render(stepSize))
          notes.add(n.note());
       java.nio.file.Files.write(file,
-         MidiFile.write(notes, model.renderControls(), stepSize, model.length()));
+         MidiFile.write(notes, comp.renderControls(), stepSize, comp.length()));
       return file;
    }
 

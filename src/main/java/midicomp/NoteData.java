@@ -99,6 +99,20 @@ record NoteData(
    }
 
    /**
+    * Returns a copy of this note at another step.
+    *
+    * Args:
+    *    newX: start step.
+    */
+   NoteData withX(final int newX)
+   {
+      return new NoteData(channel, newX, key, velocity, releaseVelocity, velocitySpread, duration,
+         pan, timbre, pressure, gain, transpose, chanceEnabled, chance, occurrenceEnabled,
+         occurrence, recurrenceEnabled, recurrenceLength, recurrenceMask, repeatEnabled,
+         repeatCount, repeatCurve, repeatVelocityEnd, repeatVelocityCurve, muted, selected);
+   }
+
+   /**
     * Returns a copy of this note with a different length.
     *
     * Args:

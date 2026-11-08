@@ -260,6 +260,61 @@ final class CompModel
       return result;
    }
 
+   /**
+    * Returns the part of the comp inside ``[from, from + length)`` as a new comp starting at 0:
+    * takes and segments cropped and moved, notes shortened at the end, and each take's
+    * controller values at ``from`` repeated at 0.
+    *
+    * Args:
+    *    from: first step.
+    *    length: number of steps.
+    *    stepSize: grid step length in beats.
+    */
+   CompModel cropped(final int from, final int length, final double stepSize)
+   {
+      final int to = from + length;
+      final List<Take> copies = new ArrayList<>();
+      final List<Integer> ids = new ArrayList<>();
+      for (final Take t : takes)
+      {
+         final List<NoteData> notes = new ArrayList<>();
+         for (final NoteData n : t.notes())
+         {
+            if (n.x() < from || n.x() >= to)
+               continue;
+            final double room = (to - n.x()) * stepSize;
+            final NoteData moved = n.withX(n.x() - from);
+            notes.add(n.duration() > room ? moved.withDuration(room) : moved);
+         }
+         final java.util.Map<Integer, ControlEvent> before = new java.util.LinkedHashMap<>();
+         final List<ControlEvent> controls = new ArrayList<>();
+         for (final ControlEvent c : t.controls())
+         {
+            if (c.x() < from)
+               before.put(c.controller(), c);
+            else if (c.x() < to)
+               controls.add(c.at(c.x() - from));
+         }
+         final List<ControlEvent> all = new ArrayList<>();
+         for (final ControlEvent c : before.values())
+            all.add(c.at(0));
+         all.addAll(controls);
+         copies.add(new Take(t.id(), t.name(), t.source(), length, notes, all));
+         ids.add(t.id());
+      }
+      final List<int[]> cut = new ArrayList<>();
+      for (final Segment s : segments)
+      {
+         final int a = Math.max(s.from(), from);
+         final int b = Math.min(s.to(), to);
+         if (b > a)
+            cut.add(new int[] { a - from, b - from, ids.indexOf(s.takeId()) });
+      }
+      final CompModel result = new CompModel();
+      result.restore(copies, cut);
+      return result;
+   }
+
    /** Removes all takes and segments. */
    void clear()
    {

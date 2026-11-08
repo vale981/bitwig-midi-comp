@@ -109,4 +109,28 @@ class ControlsTest
          new StateJson.Selection(null, null), null, false, "", List.of());
       assertTrue(state.contains("\"controls\":1"));
    }
+
+   @Test
+   void croppingKeepsTheLoopRegionWithItsControllerState()
+   {
+      final CompModel model = new CompModel();
+      final NoteData hat = new NoteData(9, 0, 42, 0.8, 0, 0, 0.5, 0, 0, 0, 0.5, 0, false, 1,
+         false, null, false, 1, 1, false, 1, 0, 1, 0, false, false);
+      final Take take = model.addTake("Pass 1", Take.Source.ARRANGER, 1024,
+         List.of(hat.withX(100), hat.withX(300), hat.withX(700)),
+         List.of(pedal(50, 127), pedal(350, 0)));
+      model.assign(0, 1024, take.id());
+
+      // Loop region: steps 256 to 768 (one beat is 128 steps).
+      final CompModel loop = model.cropped(256, 512, 1.0 / 128);
+      assertEquals(512, loop.takes().get(0).length());
+      final List<Integer> xs = loop.takes().get(0).notes().stream().map(NoteData::x).toList();
+      assertEquals(List.of(44, 444), xs); // steps 300 and 700; step 100 lies before the region
+      // The note at 444 has 68 steps (0.53 beats) left in the region, more than its 0.5 beats.
+      assertEquals(0.5, loop.takes().get(0).notes().get(1).duration(), 1e-9);
+      // The pedal was closed (step 50) before the region and opens at step 350.
+      assertEquals(List.of(pedal(0, 127), pedal(94, 0)), loop.takes().get(0).controls());
+      assertEquals(0, loop.segments().get(0).from());
+      assertEquals(512, loop.segments().get(0).to());
+   }
 }
