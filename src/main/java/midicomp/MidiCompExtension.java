@@ -189,9 +189,32 @@ public class MidiCompExtension extends ControllerExtension
    private long seenRevision;
    private long revisionChangedAt;
    private static final long RELOAD_DELAY_NANOS = 1_200_000_000L;
-   /** A MIDI file waiting for :member:`loadBank` to reach the comp track. */
-   private String pendingLoad;
-   private long pendingLoadAt;
+   /** A MIDI file being loaded into a launcher slot, see :meth:`tickSlotLoad`. */
+   private static final class SlotLoad
+   {
+      final int track;
+      int scene;
+      final String file;
+      final String clipName;
+      final boolean session;
+      final long since = System.nanoTime();
+      long at = System.nanoTime() + 300_000_000L;
+      boolean deleted;
+
+      SlotLoad(final int track, final int scene, final String file, final String clipName,
+         final boolean session)
+      {
+         this.track = track;
+         this.scene = scene;
+         this.file = file;
+         this.clipName = clipName;
+         this.session = session;
+      }
+   }
+
+   private SlotLoad slotLoad;
+   /** Slots this extension loaded comps into (track * 1000 + scene) and the clip names. */
+   private final Map<Integer, String> ownSlots = new java.util.HashMap<>();
    /** Control messages for the passes being added by :meth:`addPass`, in order. */
    private final ArrayDeque<List<ControlEvent>> passControls = new ArrayDeque<>();
    /** After a MIDI file replaced the session clip: rewrite the notes from this time on. */
@@ -201,6 +224,7 @@ public class MidiCompExtension extends ControllerExtension
    private int repinScene;
    private int repinStep;
    private long lastRepin;
+   private long repinSince;
    /** A comp to import once the next session has started. */
    private String carryAfterStart;
 
@@ -361,7 +385,10 @@ public class MidiCompExtension extends ControllerExtension
       track.position().markInterested();
       track.name().markInterested();
       for (int i = 0; i < LOAD_SCENES; i++)
+      {
          track.clipLauncherSlotBank().getItemAt(i).hasContent().markInterested();
+         track.clipLauncherSlotBank().getItemAt(i).name().markInterested();
+      }
    }
 
    private void initArrangerCursor()
@@ -1401,23 +1428,17 @@ public class MidiCompExtension extends ControllerExtension
       {
          return Result.fail("Could not write the MIDI file: " + e.getMessage());
       }
+      loadBank.scrollPosition().set(live.link().trackPosition());
+      final String clipName = file.getFileName().toString().replaceFirst("\\.mid$", "");
       if (launcher)
       {
-         targetCursor.clipLauncherSlot().replaceInsertionPoint().insertFile(file.toString());
-         // The pinned cursor stays with the replaced clip: select the slot's new clip and pin it
-         // again (through the load bank, whose slots stay put), then rewrite the notes, as MIDI
-         // files cannot hold timbre, chance and other note values.
-         loadBank.scrollPosition().set(live.link().trackPosition());
-         repinScene = live.link().sceneIndex();
-         repinStep = 0;
-         repinAt = System.nanoTime() + 900_000_000L;
-         rewriteAfterLoadAt = System.nanoTime() + 1_500_000_000L;
-         log("Loaded " + file + " into " + live.link().label());
-         return Result.ok("Loaded the comp into " + live.link().label());
+         // Into the session's own slot; the extension follows the new clip afterwards.
+         slotLoad = new SlotLoad(live.link().trackPosition(), live.link().sceneIndex(),
+            file.toString(), clipName, true);
+         return Result.ok("Loading the comp into " + live.link().label());
       }
-      loadBank.scrollPosition().set(live.link().trackPosition());
-      pendingLoad = file.toString();
-      pendingLoadAt = System.nanoTime();
+      // Into the slot used last time on this track, else the first free one.
+      slotLoad = new SlotLoad(live.link().trackPosition(), -1, file.toString(), clipName, false);
       return Result.ok("Loading the comp into a launcher slot of " + live.link().trackName());
    }
 
@@ -1452,8 +1473,8 @@ public class MidiCompExtension extends ControllerExtension
          return Result.fail("Could not write the MIDI file: " + e.getMessage());
       }
       loadBank.scrollPosition().set(live.link().trackPosition());
-      pendingLoad = file.toString();
-      pendingLoadAt = System.nanoTime();
+      slotLoad = new SlotLoad(live.link().trackPosition(), -1, file.toString(),
+         file.getFileName().toString().replaceFirst("\\.mid$", ""), false);
       launcherPlay = new LauncherPlay(comp, 0, loopBeats);
       launcherOrigin = new LauncherOrigin(live.link(),
          CompExport.write(model, live.link(), project.get(), stepSize), from * stepSize, loopBeats);
@@ -1587,7 +1608,13 @@ public class MidiCompExtension extends ControllerExtension
 
       final Track track = loadBank.getItemAt(0);
       if (track.position().get() == origin.arranger().trackPosition())
+      {
          track.returnToArrangement();
+         final int cleared = clearOwnSlots(origin.arranger().trackPosition());
+         if (cleared > 0)
+            log("Back to arranger: removed " + cleared + " launcher clip"
+               + (cleared == 1 ? "" : "s") + " made by MIDI Comp");
+      }
       else
          log("Back to arranger: use Back to arrangement in Bitwig for the comp track");
       syncedClip = null;
@@ -1640,15 +1667,17 @@ public class MidiCompExtension extends ControllerExtension
          seenRevision = revision;
          revisionChangedAt = now;
       }
-      if (revision == syncedRevision || now - revisionChangedAt < RELOAD_DELAY_NANOS
-         || launcherPlay != null || repinAt != 0 || rewriteAfterLoadAt != 0 || isRecording())
+      final boolean settingUp = launcherPlay != null && launcherPlay.step < 2;
+      if (revision == syncedRevision || now - revisionChangedAt < RELOAD_DELAY_NANOS || settingUp
+         || slotLoad != null || repinAt != 0 || rewriteAfterLoadAt != 0 || isRecording())
          return;
       syncedRevision = revision;
       final boolean playing = targetCursor.clipLauncherSlot().isPlaying().get();
       final Result loaded = loadIntoBitwig();
       log("Comp changed: " + loaded.message() + (!playing ? ""
          : synced != null ? "; relaunching at the next loop start" : "; relaunching"));
-      if (loaded.ok() && playing && link.sceneIndex() < LOAD_SCENES)
+      if (loaded.ok() && playing && link.sceneIndex() < LOAD_SCENES
+         && (launcherPlay == null || launcherPlay.step < 2))
       {
          final LauncherPlay relaunch =
             new LauncherPlay(null, 0, synced != null ? synced.loopBeats() : 0);
@@ -1721,7 +1750,7 @@ public class MidiCompExtension extends ControllerExtension
       if (repinAt != 0 && now > repinAt)
       {
          final Track track = loadBank.getItemAt(0);
-         if (live.link() == null || repinScene >= LOAD_SCENES)
+         if (live.link() == null || repinScene >= LOAD_SCENES || now - repinSince > 5_000_000_000L)
             repinAt = 0;
          else if (track.position().get() != live.link().trackPosition())
             repinAt = now + 200_000_000L; // the bank is still scrolling
@@ -1735,8 +1764,25 @@ public class MidiCompExtension extends ControllerExtension
          {
             pinTargetToSelection();
             repinAt = 0;
+            final SyncedClip synced = syncedClip;
+            if (synced != null && synced.trackPosition() == live.link().trackPosition()
+               && synced.sceneIndex() == repinScene)
+            {
+               // A new clip has default settings: loop and quantize it for the synced launch.
+               targetCursor.isLoopEnabled().set(true);
+               targetCursor.getLoopStart().set(0);
+               targetCursor.getLoopLength().set(synced.loopBeats());
+               final String quantization = launchQuantizationId("1");
+               if (quantization != null)
+                  targetCursor.launchQuantization().set(quantization);
+            }
             log("Following the reloaded clip again");
          }
+      }
+      if (rewriteAfterLoadAt != 0 && now > rewriteAfterLoadAt + 8_000_000_000L)
+      {
+         rewriteAfterLoadAt = 0;
+         log("The loaded clip did not become available; select it to continue comping");
       }
       if (rewriteAfterLoadAt != 0 && now > rewriteAfterLoadAt && live.link() != null
          && sessionAvailable() && sessionClip().isSettled(LiveSync.SETTLE_MILLIS))
@@ -1746,41 +1792,138 @@ public class MidiCompExtension extends ControllerExtension
          live.link(live.link(), List.of());
          log("Rewriting the comp's notes over the loaded file");
       }
-      if (pendingLoad == null || now - pendingLoadAt < 300_000_000L)
+      tickSlotLoad(now);
+   }
+
+   /**
+    * Loads a MIDI file into a launcher slot (:member:`slotLoad`): picks the slot, deletes the clip
+    * in it (loading into an occupied slot does not replace the clip's automation), waits until
+    * the slot is empty and loads the file.
+    */
+   private void tickSlotLoad(final long now)
+   {
+      final SlotLoad load = slotLoad;
+      if (load == null || now < load.at)
          return;
-      final String file = pendingLoad;
-      pendingLoad = null;
       final Track track = loadBank.getItemAt(0);
-      if (live.link() == null || track.position().get() != live.link().trackPosition())
+      if (track.position().get() != load.track)
       {
-         lastMessage = "Could not find the comp track; the MIDI file is " + file;
-         markDirty();
-         return;
-      }
-      for (int i = 0; i < LOAD_SCENES; i++)
-      {
-         final ClipLauncherSlot slot = track.clipLauncherSlotBank().getItemAt(i);
-         if (slot.hasContent().get())
-            continue;
-         slot.replaceInsertionPoint().insertFile(file);
-         log("Loaded " + file + " into launcher slot " + (i + 1) + " of " + track.name().get());
-         // Copying it into the arranger is left to the user: copy and paste through the API
-         // do not carry the clip's automation, Bitwig's own copy and paste do.
-         lastMessage = String.format("Loaded the comp into launcher slot %d of %s; copy it over "
-            + "the arranger clip", i + 1, track.name().get());
-         if (launcherPlay != null && launcherPlay.slot == null)
+         if (now - load.since > 3_000_000_000L)
          {
-            launcherPlay.slot = slot;
-            launcherPlay.slotIndex = i;
-            launcherPlay.at = System.nanoTime() + 1_000_000_000L;
-            launcherPlay.since = System.nanoTime();
+            slotLoad = null;
+            lastMessage = "Could not find the comp track; the MIDI file is " + load.file;
+            markDirty();
          }
-         markDirty();
+         else
+            load.at = now + 100_000_000L; // the bank is still scrolling
          return;
       }
-      lastMessage = "No free launcher slot in the first " + LOAD_SCENES + " scenes; the MIDI file "
-         + "is " + file;
+      if (load.scene < 0)
+      {
+         load.scene = ownSlot(track, load.track);
+         for (int i = 0; load.scene < 0 && i < LOAD_SCENES; i++)
+            if (!track.clipLauncherSlotBank().getItemAt(i).hasContent().get())
+               load.scene = i;
+         if (load.scene < 0)
+         {
+            slotLoad = null;
+            lastMessage = "No free launcher slot in the first " + LOAD_SCENES + " scenes; the "
+               + "MIDI file is " + load.file;
+            markDirty();
+            return;
+         }
+      }
+      if (load.scene >= LOAD_SCENES)
+      {
+         slotLoad = null;
+         log("The slot is beyond the first " + LOAD_SCENES + " scenes; load " + load.file
+            + " yourself");
+         return;
+      }
+      final ClipLauncherSlot slot = track.clipLauncherSlotBank().getItemAt(load.scene);
+      if (slot.hasContent().get())
+      {
+         if (!load.deleted)
+         {
+            slot.deleteObject();
+            load.deleted = true;
+         }
+         if (now - load.since > 4_000_000_000L)
+         {
+            slotLoad = null;
+            log("Could not empty launcher slot " + (load.scene + 1) + "; the MIDI file is "
+               + load.file);
+            return;
+         }
+         load.at = now + 100_000_000L;
+         return;
+      }
+      slotLoad = null;
+      slot.replaceInsertionPoint().insertFile(load.file);
+      ownSlots.put(load.track * 1000 + load.scene, load.clipName);
+      log("Loaded " + load.file + " into launcher slot " + (load.scene + 1) + " of "
+         + track.name().get());
+      if (load.session)
+      {
+         // Follow the slot's new clip, then rewrite the notes: MIDI files cannot hold timbre,
+         // chance and other note values.
+         repinScene = load.scene;
+         repinStep = 0;
+         repinAt = now + 900_000_000L;
+         repinSince = now;
+         rewriteAfterLoadAt = now + 1_500_000_000L;
+         return;
+      }
+      // Copying it into the arranger is left to the user: copy and paste through the API do
+      // not carry the clip's automation, Bitwig's own copy and paste do.
+      lastMessage = String.format("Loaded the comp into launcher slot %d of %s; copy it over the "
+         + "arranger clip", load.scene + 1, track.name().get());
+      if (launcherPlay != null && launcherPlay.slot == null)
+      {
+         launcherPlay.slot = slot;
+         launcherPlay.slotIndex = load.scene;
+         launcherPlay.at = now + 1_000_000_000L;
+         launcherPlay.since = now;
+      }
       markDirty();
+   }
+
+   /** Returns the scene of a slot this extension filled on the track, if it still holds that clip. */
+   private int ownSlot(final Track track, final int trackPosition)
+   {
+      for (final Map.Entry<Integer, String> e : ownSlots.entrySet())
+      {
+         if (e.getKey() / 1000 != trackPosition || e.getKey() % 1000 >= LOAD_SCENES)
+            continue;
+         final ClipLauncherSlot slot = track.clipLauncherSlotBank().getItemAt(e.getKey() % 1000);
+         if (slot.hasContent().get() && slot.name().get().equals(e.getValue()))
+            return e.getKey() % 1000;
+      }
+      return -1;
+   }
+
+   /** Deletes the clips this extension loaded into slots of the track, if still unchanged. */
+   private int clearOwnSlots(final int trackPosition)
+   {
+      final Track track = loadBank.getItemAt(0);
+      if (track.position().get() != trackPosition)
+         return 0;
+      int cleared = 0;
+      for (final java.util.Iterator<Map.Entry<Integer, String>> it = ownSlots.entrySet().iterator();
+         it.hasNext();)
+      {
+         final Map.Entry<Integer, String> e = it.next();
+         if (e.getKey() / 1000 != trackPosition || e.getKey() % 1000 >= LOAD_SCENES)
+            continue;
+         final ClipLauncherSlot slot = track.clipLauncherSlotBank().getItemAt(e.getKey() % 1000);
+         if (slot.hasContent().get() && slot.name().get().equals(e.getValue()))
+         {
+            slot.deleteObject();
+            cleared++;
+         }
+         it.remove();
+      }
+      return cleared;
    }
 
    /**

@@ -76,8 +76,11 @@ Two parts:
    the comp track, from where you copy them over the arranger clip (copy and paste in Bitwig, or
    drag). The extension cannot take this step itself: copy and paste through the API lose the
    clip's automation. The files are kept in `~/.midicomp/midi`. In launcher sessions this
-   happens by itself: about a second after the last edit, the comp is loaded into the clip again
-   with its automation, and a playing clip is relaunched.
+   happens by itself: about a second after the last edit, the clip is replaced by the comp with
+   its automation (deleted and loaded again, which also resets clip settings such as color and
+   launch options), and a playing clip is relaunched. Clips MIDI Comp loaded into other slots are
+   reused for later loads and removed by *Back to arranger*, as long as their names are
+   unchanged.
 
    *Play in launcher* (arranger comps) plays the comp from the clip launcher while the other
    tracks play the arrangement. It loads the part of the comp inside the arranger loop region
