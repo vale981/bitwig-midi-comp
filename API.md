@@ -91,11 +91,11 @@ State document:
   "takes": [
     {"id": 1, "name": "Pass 1", "source": "arranger", "length": 2048, "controls": 12,
      "cc": [[x, status, data1, data2], ...],
-     "notes": [[x, key, durationSteps, velocity, muted, -1], ...]}
+     "notes": [[x, key, durationSteps, velocity, muted, -1, channel], ...]}
   ],
   "segments": [[from, to, takeId], ...],
   "compControls": [[x, status, data1, data2], ...],   // the comp's CC, pressure, pitch bend
-  "comp": [[x, key, durationSteps, velocity, muted, takeId], ...]
+  "comp": [[x, key, durationSteps, velocity, muted, takeId, channel], ...]
 }
 ```
 
@@ -118,6 +118,7 @@ Bitwig did not process the command within 5 s.
 | `loadIntoBitwig` |                       | Write the comp, notes and control messages, as a MIDI file (`~/.midicomp/midi/<title>.mid`) and load it: into the session clip's slot for launcher clips (the notes are written again afterwards, as MIDI files lack per-note values like timbre), else into the first free launcher slot of the comp track. |
 | `playInLauncher` |                       | Arranger sessions with the arranger loop on: load the part of the comp inside the arranger loop region into a free launcher slot as a clip one loop long (launch quantization one bar), continue the session in that clip with the takes and segments cropped the same way, and launch it in the loop's last bar, so it plays in sync with the arrangement. |
 | `backToArranger` |                       | From a launcher copy made by `playInLauncher`: merge its segments (and take names) back into the full arranger comp, return the comp track to the arrangement and continue the session in the selected arranger clip of that track. |
+| `audition`   | `on=true\|false`           | Arranger sessions: preview on empties the comp clip, holds writing to it and turns the comp track's monitoring on, while the companion plays the comp as live MIDI; off writes the comp back. |
 | `transport`  | `action=play\|stop\|toggle` | Start or stop Bitwig's transport. |
 | `seek`       | `step`                      | Arranger sessions: move the playhead to a step of the session clip (sets the play start, and jumps there while playing). Needs the clip's position in the arrangement, which the extension learns while the clip plays. |
 | `revert`     |                             | Restore the clip as it was before the session and end it. |
@@ -161,14 +162,20 @@ The playhead in the session clip, kept out of the state because it changes many 
 
 ```json
 {"playing": true, "step": 1834, "stepsPerSecond": 512.0, "canSeek": true,
- "transportPlaying": true}
+ "transportPlaying": true, "auditioning": false,
+ "originBeat": 248.0, "stepSize": 0.00048828125, "loop": [0.0, 30720.0],
+ "anchor": {"us": 81234567890, "step": 1835.4}}
 ```
 
 `step` is the step being played in the session clip, or `-1` outside it. For arranger clips
 whose position is known (learned while the clip plays: transport position minus playing step),
 it also follows the transport while the clip is not selected, and shows the play start position
 while stopped. `canSeek` says whether `seek` works; `transportPlaying` whether Bitwig plays at
-all. While Bitwig records into a hidden arranger clip, it is derived from the
+all. For arranger comps whose position is known, `originBeat` is the arrangement beat of step 0
+and `stepSize` the beats per step, `loop` the arranger loop region in steps (if on), and
+`anchor` while playing a fitted transport position: the step at a monotonic time in
+microseconds on the companion's clock (corrected by the clock offset from `played`), for
+scheduling previews. While Bitwig records into a hidden arranger clip, it is derived from the
 transport position and the loop start in the clip measured at the last recording.
 `stepsPerSecond` lets clients interpolate between polls.
 

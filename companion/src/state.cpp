@@ -40,6 +40,7 @@ std::vector<Note> parseNotes(const json& array) {
             .velocity = n.at(3).get<double>(),
             .muted = n.at(4).get<int>() != 0,
             .take = n.at(5).get<int>(),
+            .channel = n.size() > 6 ? n.at(6).get<int>() : 0,
         });
     }
     return notes;
@@ -135,6 +136,7 @@ State parseState(const std::string_view text) {
             .preview = {},
             .fingerprint = it->value("fingerprint", std::string{}),
             .fromArranger = it->value("fromArranger", false),
+            .auditioning = it->value("auditioning", false),
         };
         if (const auto preview = it->find("preview"); preview != it->end())
             for (const auto& p : *preview)

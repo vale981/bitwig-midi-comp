@@ -210,6 +210,13 @@ public class MidiCompExtension extends ControllerExtension
    private LauncherOrigin launcherOrigin;
    /** After Back to arranger: load the merged comp into a launcher slot from this time on. */
    private long loadAfterBackAt;
+   /**
+    * Previewing: the companion plays the comp to the track as live MIDI, the comp clip stays
+    * empty meanwhile (see :meth:`audition`).
+    */
+   private boolean auditioning;
+   /** Transport position samples ``{nanoTime, beat}`` while playing, for :meth:`transportFit`. */
+   private final ArrayDeque<double[]> fitSamples = new ArrayDeque<>();
    private long syncedRevision;
    /** The launcher session :meth:`tickAutoReload` follows; a new one resets its baseline. */
    private ClipRef reloadLink;
@@ -584,7 +591,8 @@ public class MidiCompExtension extends ControllerExtension
             capture.isPending() && !sessionAvailable(),
             preview,
             sessionFingerprint,
-            launcherOrigin != null && syncedClip != null);
+            launcherOrigin != null && syncedClip != null,
+            auditioning);
 
       return StateJson.build(stateVersion, model, stepSize, barSteps(), project.get(), selection,
          session, !history.isEmpty(), lastMessage, List.copyOf(eventLog));
@@ -622,6 +630,7 @@ public class MidiCompExtension extends ControllerExtension
          case "loadIntoBitwig" -> loadIntoBitwig();
          case "playInLauncher" -> playInLauncher();
          case "backToArranger" -> backToArranger();
+         case "audition" -> audition(!"false".equals(p.get("on")));
          case "revert" -> undoLastWrite();
          default -> Result.fail("Unknown command: " + op);
       };
@@ -1122,7 +1131,7 @@ public class MidiCompExtension extends ControllerExtension
             log("Recording did not start; restoring the comp");
          }
       }
-      if (recording || capture.isPending() || recordingRequested)
+      if (recording || capture.isPending() || recordingRequested || auditioning)
       {
          live.holdForRecording();
          return;
@@ -1291,6 +1300,38 @@ public class MidiCompExtension extends ControllerExtension
          timeline.add(now, position);
       }
       lastPosition = position;
+      sampleTransport(now, position);
+   }
+
+   /**
+    * Collects transport position samples while playing; a jump (seek, loop wrap, stop) starts
+    * over. The fit gives the companion a precise beat-versus-time anchor for previews.
+    */
+   private void sampleTransport(final long now, final double position)
+   {
+      if (!transport.isPlaying().get())
+      {
+         fitSamples.clear();
+         return;
+      }
+      final double fitted = transportFit(now);
+      if (!Double.isNaN(fitted) && Math.abs(fitted - position) > 0.25)
+         fitSamples.clear();
+      fitSamples.addLast(new double[] { now, position });
+      while (fitSamples.size() > 48)
+         fitSamples.removeFirst();
+   }
+
+   /** Returns the fitted transport beat at ``time`` (nanoseconds), or NaN with too few samples. */
+   private double transportFit(final long time)
+   {
+      if (fitSamples.size() < 4)
+         return Double.NaN;
+      final double beatsPerNano = transport.tempo().value().getRaw() / 60e9;
+      double intercept = 0;
+      for (final double[] s : fitSamples)
+         intercept += s[1] - beatsPerNano * s[0];
+      return intercept / fitSamples.size() + beatsPerNano * time;
    }
 
    /**
@@ -1430,11 +1471,34 @@ public class MidiCompExtension extends ControllerExtension
          }
       }
       final double stepsPerSecond = transport.tempo().value().getRaw() / 60.0 / stepSize;
+      // For previews: where step 0 of the comp lies in the arrangement, the loop region in
+      // steps, and a fitted anchor (companion clock) of the transport while playing.
+      final StringBuilder extra = new StringBuilder();
+      final double origin = arrangerClipStart();
+      if (!Double.isNaN(origin))
+      {
+         extra.append(String.format(java.util.Locale.ROOT, ",\"originBeat\":%.6f,\"stepSize\":%s",
+            origin, Json.number(stepSize)));
+         if (transport.isArrangerLoopEnabled().get())
+         {
+            final double loopStart = transport.arrangerLoopStart().get();
+            extra.append(String.format(java.util.Locale.ROOT, ",\"loop\":[%.3f,%.3f]",
+               (loopStart - origin) / stepSize,
+               (loopStart + transport.arrangerLoopDuration().get() - origin) / stepSize));
+         }
+         final long now = System.nanoTime();
+         final double fitted = transportFit(now);
+         if (playing && !Double.isNaN(fitted))
+            extra.append(String.format(java.util.Locale.ROOT,
+               ",\"anchor\":{\"us\":%d,\"step\":%.3f}",
+               (now - keyboard.clockOffset()) / 1000, (fitted - origin) / stepSize));
+      }
       return String.format(java.util.Locale.ROOT,
          "{\"playing\":%b,\"step\":%d,\"stepsPerSecond\":%.3f,\"canSeek\":%b,"
-            + "\"transportPlaying\":%b}",
+            + "\"transportPlaying\":%b,\"auditioning\":%b%s}",
          playing && step >= 0, step, stepsPerSecond,
-         !Double.isNaN(arrangerClipStart()) || syncedFor(live.link()) != null, playing);
+         !Double.isNaN(arrangerClipStart()) || syncedFor(live.link()) != null, playing,
+         auditioning, extra);
    }
 
    /**
@@ -1665,6 +1729,62 @@ public class MidiCompExtension extends ControllerExtension
             launcherPlay = null;
          }
       }
+   }
+
+   /**
+    * Starts or ends a preview: the companion plays the comp to the comp track as live MIDI (with
+    * its controllers), so edits are heard at once without writing the clip. Meanwhile the comp
+    * clip is empty and the track monitors its input; afterwards the clip gets the comp again.
+    *
+    * Args:
+    *    on: start or end.
+    */
+   private Result audition(final boolean on)
+   {
+      if (live.link() == null || live.link().source() != Take.Source.ARRANGER)
+         return Result.fail("Previews work for arranger comps");
+      if (on == auditioning)
+         return Result.ok(on ? "Previewing" : "Not previewing");
+      final Track track = loadBank.getItemAt(0);
+      if (track.position().get() != live.link().trackPosition())
+      {
+         loadBank.scrollPosition().set(live.link().trackPosition());
+         return Result.fail("Finding the comp track; try again in a moment");
+      }
+      if (on)
+      {
+         if (!sessionAvailable())
+            return Result.fail("Select the comp clip in the arranger first");
+         sessionClip().clearAll();
+         auditioning = true;
+         setMonitoring(track, true);
+         log("Preview on: the comp clip is empty, the companion plays the comp to the track");
+         return Result.ok("Previewing: the companion plays the comp");
+      }
+      auditioning = false;
+      setMonitoring(track, false);
+      // Expect an empty clip, so the whole comp is written back.
+      live.link(live.link(), List.of());
+      log("Preview off: writing the comp back into the clip");
+      return Result.ok("Preview off; the comp is written back");
+   }
+
+   /** Switches a track's input monitoring on (or back to automatic). */
+   private void setMonitoring(final Track track, final boolean on)
+   {
+      final com.bitwig.extension.controller.api.EnumDefinition modes =
+         track.monitorMode().enumDefinition();
+      final List<String> ids = new ArrayList<>();
+      for (int i = 0; i < modes.getValueCount(); i++)
+         ids.add(modes.valueDefinitionAt(i).getId());
+      final String wanted = on ? "ON" : "AUTO";
+      for (final String id : ids)
+         if (id.equalsIgnoreCase(wanted))
+         {
+            track.monitorMode().set(id);
+            return;
+         }
+      log("Monitor modes: " + String.join(", ", ids) + "; set the track's monitoring yourself");
    }
 
    /**

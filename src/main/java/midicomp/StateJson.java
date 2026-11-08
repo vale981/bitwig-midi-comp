@@ -44,6 +44,7 @@ final class StateJson
     *    preview: provisional takes of the current recording, from the keyboard notes.
     *    fingerprint: fingerprint of the clip's content when the session started.
     *    fromArranger: whether the session runs in a launcher copy made by "Play in launcher".
+    *    auditioning: whether the companion plays the comp as live MIDI (preview).
     */
    record SessionStatus(
       ClipRef clip,
@@ -58,7 +59,8 @@ final class StateJson
       boolean collecting,
       List<PreviewPass> preview,
       String fingerprint,
-      boolean fromArranger)
+      boolean fromArranger,
+      boolean auditioning)
    {
    }
 
@@ -131,6 +133,7 @@ final class StateJson
             .append(",\"track\":").append(Json.quote(session.clip().trackName()))
             .append(",\"fingerprint\":").append(Json.quote(session.fingerprint()))
             .append(",\"fromArranger\":").append(session.fromArranger())
+            .append(",\"auditioning\":").append(session.auditioning())
             .append(",\"preview\":[");
       if (session != null)
       {
@@ -217,7 +220,7 @@ final class StateJson
       }
    }
 
-   /** Appends ``[x, key, durationSteps, velocity, muted, takeId]``. */
+   /** Appends ``[x, key, durationSteps, velocity, muted, takeId, channel]``. */
    private static void appendNote(
       final StringBuilder sb,
       final NoteData n,
@@ -227,6 +230,7 @@ final class StateJson
       sb.append('[').append(n.x()).append(',').append(n.key()).append(',')
          .append(Json.number(Math.round(n.duration() / stepSize * 100.0) / 100.0)).append(',')
          .append(Json.number(Math.round(n.velocity() * 1000.0) / 1000.0)).append(',')
-         .append(n.muted() ? 1 : 0).append(',').append(takeId).append(']');
+         .append(n.muted() ? 1 : 0).append(',').append(takeId).append(',').append(n.channel())
+         .append(']');
    }
 }

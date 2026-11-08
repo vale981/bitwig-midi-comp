@@ -74,6 +74,21 @@ class MidiCopiesTest(unittest.TestCase):
         self.assertTrue(any("taken over from Launchpad:Launchpad MIDI 1" in m
                             for m in result.messages))
 
+    def test_the_companion_preview_port_gets_a_copy(self):
+        proc = PROC.replace('''Client 128 : "MIDI Comp" [User Legacy]
+  Port   0 : "Keyboard" (-We-) [Out]''', '''Client 128 : "MIDI Comp" [User Legacy]
+  Port   0 : "Keyboard" (-We-) [Out]
+Client 129 : "MIDI Comp" [User Legacy]
+  Port   0 : "Preview" (R-e-) [In]''')
+        result = plan(parse_clients(proc), {}, 100.0, {"Midi Through", "USB Axiom 61"})
+        # The excluded Axiom frees the first copy, which the preview port gets.
+        self.assertEqual(result.state["MIDI Comp:Preview"]["copy"], "Virtual Raw MIDI 16-0")
+        self.assertIn(((129, 0), (24, 0)), result.connect)
+        self.assertIn(((20, 0), (24, 0)), result.disconnect)
+        # Output only: nothing goes back to it, and the keyboard input port gets no copy.
+        self.assertNotIn(((24, 0), (129, 0)), result.connect)
+        self.assertNotIn("MIDI Comp:Keyboard", result.state)
+
     def test_describe(self):
         lines = describe(parse_clients(PROC))
         self.assertEqual(lines[0].split(), ["VirMIDI", "16-0", "<-", "USB", "Axiom", "61:USB",

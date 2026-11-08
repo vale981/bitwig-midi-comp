@@ -4,6 +4,7 @@
 #include "comp_store.hpp"
 #include "midi_input.hpp"
 #include "palette.hpp"
+#include "preview_player.hpp"
 #include "settings.hpp"
 #include "snap.hpp"
 
@@ -67,6 +68,15 @@ class CompView {
      *     name: the name to show.
      */
     void setDemoKeyboard(std::string name) { demoKeyboard_ = std::move(name); }
+
+    /**
+     * Enables previews: the player plays the comp as live MIDI while the extension reports a
+     * preview.
+     *
+     * Args:
+     *     player: the preview player; must outlive the view, or be reset to null first.
+     */
+    void setPreviewPlayer(PreviewPlayer* player) { previewPlayer_ = player; }
 
     /**
      * Sets the user's UI scale factor shown in the View popup.
@@ -216,6 +226,8 @@ class CompView {
     // Keyboard input.
     MidiInput* midi_ = nullptr;
     std::string demoKeyboard_;
+    PreviewPlayer* previewPlayer_ = nullptr;
+    long long previewVersion_ = -1;  ///< State version the player's comp comes from.
     Settings* settings_ = nullptr;
     std::filesystem::path settingsPath_;
     std::string compName_;                     ///< Name of the current session's comp.

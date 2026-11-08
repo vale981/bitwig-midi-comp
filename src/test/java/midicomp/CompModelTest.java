@@ -132,7 +132,7 @@ class CompModelTest
       assertTrue(json.startsWith("{\"v\":7,"), json);
       assertTrue(json.contains("\"name\":\"Take \\\"1\\\"\""), json);
       assertTrue(json.contains("\"segments\":[[0,512,1]]"), json);
-      assertTrue(json.contains("\"comp\":[[0,60,64,0.8,0,1]]"), json);
+      assertTrue(json.contains("\"comp\":[[0,60,64,0.8,0,1,0]]"), json); // channel last
       assertTrue(json.contains("\"arrangerSel\":null"), json);
       assertTrue(json.contains("\"session\":null"), json);
    }

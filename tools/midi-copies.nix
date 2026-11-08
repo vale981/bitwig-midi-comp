@@ -55,6 +55,15 @@ in
       '';
     };
 
+    include = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ "MIDI Comp" ];
+      description = ''
+        Sequencer client names of programs whose output ports get a copy too, such as the MIDI
+        Comp companion's preview port.
+      '';
+    };
+
     exclude = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ "Midi Through" ];
@@ -97,6 +106,10 @@ in
             "--exclude"
             (lib.escapeShellArg name)
           ]) cfg.exclude
+          ++ lib.concatMap (name: [
+            "--include"
+            (lib.escapeShellArg name)
+          ]) cfg.include
         );
         DynamicUser = true;
         # /dev/snd/seq belongs to the audio group.

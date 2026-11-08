@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -37,6 +38,13 @@ struct Playhead {
     double stepsPerSecond = 0.0;
     bool canSeek = false;           ///< ``seek`` works (arranger clip whose position is known).
     bool transportPlaying = false;  ///< Bitwig plays, inside the clip or not.
+    bool auditioning = false;       ///< The companion plays the comp (preview).
+    /** Arrangement beat of the comp's step 0 (arranger comps whose position is known). */
+    std::optional<double> originBeat;
+    double stepSize = 0.0;                          ///< Beats per step, with :member:`originBeat`.
+    std::optional<std::pair<double, double>> loop;  ///< Arranger loop region in steps.
+    /** Fitted transport while playing: the step at a time (monotonic µs). */
+    std::optional<std::pair<std::int64_t, double>> anchor;
     std::chrono::steady_clock::time_point at{};  ///< When it was received.
 
     /**

@@ -169,6 +169,30 @@ controllers after each edit. *Load into Bitwig* does the same on demand.
   arranger*, as long as their names are unchanged. The MIDI files are kept in
   `~/.midicomp/midi`. They contain no tempo, so Bitwig does not ask about one.
 
+### Preview (prototype)
+
+*Preview* (arranger comps) plays the comp, controllers included, as live MIDI into the comp
+track, while the clip stays empty: edits are heard at once, and nothing is written into the
+clip until the preview ends, which writes the comp back. For controllers in the final clip, use
+*Load into Bitwig* afterwards as usual.
+
+Setup, once:
+
+1. The companion has a virtual MIDI output, "MIDI Comp" / "Preview". On macOS it appears in
+   Bitwig directly; on Linux the [MIDI copies](#midi-copies-on-linux) service copies it to a
+   VirMIDI port (`midi-copies list` shows which). Windows has no virtual ports.
+2. In Bitwig, add a *Generic > MIDI Keyboard* controller with that port as its input, and set
+   the comp track's input to it.
+3. Optional, for better timing: send Bitwig's MIDI clock to the same device (*Settings >
+   Synchronization*). The companion reads it back; without it, timing comes from the
+   extension's view of the transport, which is coarser.
+
+During a preview the extension turns the track's input monitoring on, and the companion plays
+the comp while Bitwig plays, following loops, seeking and stopping. *Preview lead* in *View*
+sends the MIDI earlier, to make up for Bitwig's output latency. The tooltip of *Preview* shows
+the timing source in use. Live MIDI is not sample-accurate: expect a few milliseconds of
+variation, more without MIDI clock.
+
 ## Installation
 
 Download the extension and the companion for your platform from the

@@ -59,12 +59,24 @@ double PlayheadFollower::position(const Playhead& latest,
 std::optional<Playhead> parsePlayhead(const std::string_view json) {
     try {
         const auto j = nlohmann::json::parse(json);
-        return Playhead{.playing = j.value("playing", false),
-                        .step = j.value("step", -1),
-                        .stepsPerSecond = j.value("stepsPerSecond", 0.0),
-                        .canSeek = j.value("canSeek", false),
-                        .transportPlaying = j.value("transportPlaying", false),
-                        .at = {}};
+        return Playhead{
+            .playing = j.value("playing", false),
+            .step = j.value("step", -1),
+            .stepsPerSecond = j.value("stepsPerSecond", 0.0),
+            .canSeek = j.value("canSeek", false),
+            .transportPlaying = j.value("transportPlaying", false),
+            .auditioning = j.value("auditioning", false),
+            .originBeat = j.contains("originBeat") ? std::optional(j.at("originBeat").get<double>())
+                                                   : std::nullopt,
+            .stepSize = j.value("stepSize", 0.0),
+            .loop = j.contains("loop") ? std::optional(std::pair(j.at("loop").at(0).get<double>(),
+                                                                 j.at("loop").at(1).get<double>()))
+                                       : std::nullopt,
+            .anchor = j.contains("anchor")
+                          ? std::optional(std::pair(j.at("anchor").at("us").get<std::int64_t>(),
+                                                    j.at("anchor").at("step").get<double>()))
+                          : std::nullopt,
+            .at = {}};
     } catch (const nlohmann::json::exception&) {
         return std::nullopt;
     }

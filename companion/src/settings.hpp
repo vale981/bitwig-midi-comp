@@ -6,8 +6,9 @@ namespace midicomp {
 
 /** User preferences kept across restarts. */
 struct Settings {
-    float uiScale = 1.0f;     ///< Factor on top of the display's scale.
-    float laneHeight = 0.0f;  ///< Take lane height in unscaled pixels; 0 fits the window.
+    float uiScale = 1.0f;         ///< Factor on top of the display's scale.
+    float laneHeight = 0.0f;      ///< Take lane height in unscaled pixels; 0 fits the window.
+    float previewLeadMs = 10.0f;  ///< Preview messages are sent this much early.
 
     bool operator==(const Settings&) const = default;
 };

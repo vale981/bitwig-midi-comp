@@ -132,7 +132,7 @@ def copy_sort_key(name: str) -> tuple[int, int]:
 
 
 def plan(clients: list[Client], state: dict[str, dict], now: float,
-         exclude: set[str]) -> Plan:
+         exclude: set[str], include: frozenset[str] = frozenset({"MIDI Comp"})) -> Plan:
     """Works out the copies and the connections to change.
 
     Args:
@@ -140,13 +140,16 @@ def plan(clients: list[Client], state: dict[str, dict], now: float,
         state: the remembered assignment.
         now: current time, recorded for devices that are present.
         exclude: client names of devices that get no copy.
+        include: client names of programs whose output ports get a copy too, such as the MIDI
+            Comp companion's preview port.
 
     Returns:
         The new assignment and the connection changes.
     """
     copies = {c.name: c.ports[0] for c in clients
               if c.kernel and VIRTUAL.match(c.name) and c.ports}
-    hardware = [c for c in clients if c.kernel and c.number != 0 and not VIRTUAL.match(c.name)]
+    hardware = [c for c in clients
+                if (c.kernel and c.number != 0 and not VIRTUAL.match(c.name)) or c.name in include]
     sources = {source_key(c, p): p for c in hardware if c.name not in exclude
                for p in c.ports if p.readable}
     # Connections between copies and any device, excluded ones too, are managed here.
@@ -261,7 +264,8 @@ def default_state_path() -> Path:
     return Path(base) / "midi-copies.json"
 
 
-def run(state_path: Path, exclude: set[str], interval: float) -> None:
+def run(state_path: Path, exclude: set[str], interval: float,
+        include: frozenset[str] = frozenset({"MIDI Comp"})) -> None:
     state = load_state(state_path)
     warned: set[str] = set()
     while True:
@@ -274,7 +278,7 @@ def run(state_path: Path, exclude: set[str], interval: float) -> None:
         if not any(VIRTUAL.match(c.name) for c in clients) and "virmidi" not in warned:
             print("No virtual MIDI ports; is snd-virmidi loaded?", flush=True)
             warned.add("virmidi")
-        result = plan(clients, state, time.time(), exclude)
+        result = plan(clients, state, time.time(), exclude, include)
         for sender, receiver in result.disconnect:
             aconnect(sender, receiver, remove=True)
         for sender, receiver in result.connect:
@@ -305,10 +309,14 @@ def main() -> int:
                                  "default: Midi Through)")
     run_parser.add_argument("--interval", type=float, default=2.0,
                             help="seconds between checks")
+    run_parser.add_argument("--include", action="append",
+                            help="client name of a program whose output ports get a copy "
+                                 "(repeatable; default: MIDI Comp)")
     sub.add_parser("list", help="show the copies")
     args = parser.parse_args()
     if args.command == "run":
-        run(args.state, set(args.exclude or ["Midi Through"]), args.interval)
+        run(args.state, set(args.exclude or ["Midi Through"]), args.interval,
+            frozenset(args.include or ["MIDI Comp"]))
         return 0
     for line in describe(parse_clients(CLIENTS_FILE.read_text())):
         print(line)

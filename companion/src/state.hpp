@@ -14,7 +14,8 @@ struct Note {
     double duration = 0.0;  ///< Length in steps.
     double velocity = 0.0;  ///< 0-1.
     bool muted = false;
-    int take = -1;  ///< Source take for comp notes, ``-1`` for take notes.
+    int take = -1;    ///< Source take for comp notes, ``-1`` for take notes.
+    int channel = 0;  ///< MIDI channel, 0-15.
 };
 
 /** A control message (CC, channel pressure, pitch bend) at a step. */
@@ -71,6 +72,7 @@ struct Session {
     std::vector<PreviewPass> preview;  ///< Provisional takes of the current recording.
     std::string fingerprint;           ///< The clip's content when the session started.
     bool fromArranger = false;         ///< The session runs in a launcher copy (Play in launcher).
+    bool auditioning = false;          ///< The companion plays the comp as live MIDI (preview).
 };
 
 /** Snapshot of the extension state, see ``API.md``. */

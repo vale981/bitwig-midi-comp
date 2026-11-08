@@ -3,6 +3,7 @@
 #include "comp_view.hpp"
 #include "midi_input.hpp"
 #include "palette.hpp"
+#include "preview_player.hpp"
 #include "settings.hpp"
 #include "theme.hpp"
 
@@ -343,6 +344,13 @@ int main(int argc, char** argv) {
     {
         // The client's threads wake the UI loop; destroy it before GLFW shuts down.
         midicomp::ApiClient client(options->endpoint, [] { glfwPostEmptyEvent(); });
+        // Previews play the comp through a virtual MIDI port (not for screenshots).
+        std::unique_ptr<midicomp::PreviewPlayer> preview;
+        if (!options->screenshot) {
+            preview =
+                std::make_unique<midicomp::PreviewPlayer>([&client] { return client.playhead(); });
+            view.setPreviewPlayer(preview.get());
+        }
         const auto started = std::chrono::steady_clock::now();
 
         while (glfwWindowShouldClose(window) == GLFW_FALSE) {
@@ -403,6 +411,7 @@ int main(int argc, char** argv) {
             }
             glfwSwapBuffers(window);
         }
+        view.setPreviewPlayer(nullptr);
     }
 
     // Its driver thread wakes GLFW; close it first.

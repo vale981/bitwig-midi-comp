@@ -74,6 +74,17 @@ void CompView::draw(ApiClient& client) {
     playheadStep_ = follower_.position(playhead_, std::chrono::steady_clock::now());
     if (comping)
         handleTransportKeys(client, *state);
+    if (previewPlayer_ != nullptr) {
+        const bool auditioning = comping && state->session->auditioning;
+        if (auditioning && state->version != previewVersion_) {
+            previewPlayer_->setComp(*state);
+            previewVersion_ = state->version;
+        }
+        if (!auditioning)
+            previewVersion_ = -1;
+        previewPlayer_->setLeadMillis(settings_ != nullptr ? settings_->previewLeadMs : 10.0f);
+        previewPlayer_->setEnabled(auditioning);
+    }
     handleScaleKeys();
 
     drawToolbar(client, state);
@@ -352,6 +363,35 @@ void CompView::drawToolbar(ApiClient& client, const State* state) {
                 "arranger first.\nThe whole comp with its CC is then loaded into a free launcher "
                 "slot: copy that clip over the arranger clip.");
         }
+        if (state->session->source == "arranger" && previewPlayer_ != nullptr) {
+            ImGui::SameLine();
+            const bool auditioning = state->session->auditioning;
+            if (auditioning)
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(
+                                                           withAlpha(palette_.live, 0.5f)));
+            ImGui::BeginDisabled(!previewPlayer_->available());
+            if (ImGui::Button(auditioning ? "End preview" : "Preview"))
+                client.send("audition", {{"on", auditioning ? "false" : "true"}});
+            ImGui::EndDisabled();
+            if (auditioning)
+                ImGui::PopStyleColor();
+            const std::string timing = previewPlayer_->timingSource();
+            ImGui::SetItemTooltip(
+                "Prototype: play the comp, with its controllers, as live MIDI into the comp track\n"
+                "while the clip stays empty, so edits are heard at once. Ending the preview "
+                "writes\n"
+                "the comp back. The companion's port \"MIDI Comp / Preview\" must be the track's "
+                "input\n(on Linux through its VirMIDI copy); Bitwig's MIDI clock sent to that "
+                "device improves the timing.%s%s",
+                previewPlayer_->available() ? "" : "\n\n",
+                previewPlayer_->available()
+                    ? (auditioning ? ("\n\nTiming: " + (timing.empty() ? std::string("waiting "
+                                                                                     "for playback")
+                                                                       : timing))
+                                         .c_str()
+                                   : "")
+                    : previewPlayer_->error().c_str());
+        }
         if (state->session->source == "arranger") {
             ImGui::SameLine();
             if (ImGui::Button("Play in launcher"))
@@ -608,6 +648,15 @@ void CompView::drawViewMenu() {
         if (ImGui::IsItemDeactivatedAfterEdit())
             saveSettings(settingsPath_, *settings_);
         ImGui::EndDisabled();
+        if (previewPlayer_ != nullptr) {
+            ImGui::Separator();
+            ImGui::SetNextItemWidth(160.0f * ImGui::GetFontSize() / 13.0f);
+            ImGui::SliderFloat("Preview lead", &settings_->previewLeadMs, 0.0f, 100.0f, "%.0f ms");
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                saveSettings(settingsPath_, *settings_);
+            ImGui::SetItemTooltip("Previews send MIDI this much early, to make up for Bitwig's "
+                                  "output latency");
+        }
     }
     ImGui::EndPopup();
 }

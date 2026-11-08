@@ -2,6 +2,7 @@
 #include "comp_store.hpp"
 #include "midi_input.hpp"
 #include "palette.hpp"
+#include "preview_player.hpp"
 #include "settings.hpp"
 #include "snap.hpp"
 #include "state.hpp"
@@ -343,6 +344,11 @@ void testPlayhead() {
                .stepsPerSecond = 512.0,
                .canSeek = true,
                .transportPlaying = true,
+               .auditioning = false,
+               .originBeat = std::nullopt,
+               .stepSize = 0.0,
+               .loop = std::nullopt,
+               .anchor = std::nullopt,
                .at = t0};
     CHECK(std::abs(follower.position(p, t0) - 1000.0) < 1e-6);
     const double before = follower.position(p, t0 + milliseconds(50));  // 1025.6
@@ -358,6 +364,44 @@ void testPlayhead() {
     p.step = 512;  // stopped elsewhere
     p.at = t0 + milliseconds(200);
     CHECK(follower.position(p, t0 + milliseconds(300)) == 512.0);
+}
+
+void testAudition() {
+    // MIDI clock at 120 BPM: a pulse every 1/48 s, from song position 8 (beat 2).
+    ClockFollower clock;
+    clock.songPosition(8);
+    clock.resume(0);
+    CHECK(!clock.beatAt(0).has_value());
+    for (int i = 0; i < 48; ++i)
+        clock.pulse(1'000'000 + i * 20'833);
+    CHECK(clock.running(1'000'000 + 47 * 20'833 + 1'000));
+    const auto beat = clock.beatAt(1'000'000 + 48 * 20'833);  // one beat after the start
+    CHECK(beat && std::abs(*beat - 4.0) < 0.002);
+    CHECK(!clock.running(5'000'000));  // no pulses for a while
+    clock.stop();
+    CHECK(!clock.running(1'000'000 + 47 * 20'833));
+
+    // A comp with a note (on, off) and a pedal: order and controller state.
+    State state;
+    state.length = 1000;
+    state.comp.push_back(Note{.x = 100,
+                              .key = 42,
+                              .duration = 50,
+                              .velocity = 1.0,
+                              .muted = false,
+                              .take = 1,
+                              .channel = 9});
+    state.compControls.push_back(ControlPoint{.x = 100, .status = 0xB9, .data1 = 4, .data2 = 127});
+    state.compControls.push_back(ControlPoint{.x = 300, .status = 0xB9, .data1 = 4, .data2 = 0});
+    PreviewEvents events;
+    events.build(state);
+    const auto at100 = events.between(99.0, 100.0);
+    CHECK(at100.size() == 2 && at100[0].bytes[0] == 0xB9 && at100[1].bytes[0] == 0x99 &&
+          at100[1].bytes[2] == 127);                  // pedal before the hit
+    CHECK(events.between(100.0, 150.0).size() == 1);  // the note-off at 150
+    const auto state200 = events.controllersAt(200.0);
+    CHECK(state200.size() == 1 && state200[0].bytes[2] == 127);
+    CHECK(events.controllersAt(300.0)[0].bytes[2] == 0);
 }
 
 void testSettings() {
@@ -420,6 +464,7 @@ int main() {
         {"midi", testMidi},
         {"preview", testPreview},
         {"settings", testSettings},
+        {"audition", testAudition},
         {"recordings", testRecordingSets},
         {"playhead", testPlayhead},
     };

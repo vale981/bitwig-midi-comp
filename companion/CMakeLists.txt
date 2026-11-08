@@ -140,6 +140,7 @@ add_library(midicomp_core STATIC
   src/comp_store.cpp
   src/midi_input.cpp
   src/palette.cpp
+  src/preview_player.cpp
   src/settings.cpp
   src/state.cpp
   src/theme.cpp

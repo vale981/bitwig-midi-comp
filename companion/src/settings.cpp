@@ -19,6 +19,8 @@ Settings loadSettings(const std::filesystem::path& path) {
             settings.uiScale = scale;
         if (const float height = j.value("laneHeight", 0.0f); height >= 0.0f && height <= 1000.0f)
             settings.laneHeight = height;
+        if (const float lead = j.value("previewLeadMs", 10.0f); lead >= 0.0f && lead <= 200.0f)
+            settings.previewLeadMs = lead;
     } catch (const nlohmann::json::exception&) {
     }
     return settings;
@@ -30,8 +32,10 @@ bool saveSettings(const std::filesystem::path& path, const Settings& settings) {
     std::ofstream out(path);
     if (!out)
         return false;
-    out << nlohmann::json{{"uiScale", settings.uiScale}, {"laneHeight", settings.laneHeight}}.dump(
-               1)
+    out << nlohmann::json{{"uiScale", settings.uiScale},
+                          {"laneHeight", settings.laneHeight},
+                          {"previewLeadMs", settings.previewLeadMs}}
+               .dump(1)
         << '\n';
     return static_cast<bool>(out);
 }
